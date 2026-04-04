@@ -1,0 +1,51 @@
+{
+  "name": "Sevadal Attendance",
+  "short_name": "Sevadal",
+  "description": "Sant Nirankari Mission — Sevadal Attendance System",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#f97316",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+
+
+
+
+  "shortcuts": [
+   {
+     "name": "Dashboard",
+     "url": "/dashboard",
+     "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+   },
+   {
+     "name": "News & Notices",
+     "url": "/news",
+     "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+   },
+   {
+     "name": "Profile",
+     "url": "/profile",
+     "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+   }
+ ],
+
+
+
+ 
+  "categories": ["productivity", "utilities"],
+  "screenshots": []
+}

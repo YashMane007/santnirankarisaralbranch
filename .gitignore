@@ -1,0 +1,51 @@
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Sevadal Attendance — .gitignore
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# ━━━ Build & Dependencies ━━━
+node_modules/
+/.cache
+/build
+/.wrangler
+dist/
+
+# ━━━ Environment Variables (NEVER commit secrets) ━━━
+# .dev.vars — Local development secrets (Cloudflare Workers)
+# .env — Old format (not used by Wrangler, but exclude anyway)
+# .env.local, .env.*.local — IDE/local overrides
+.dev.vars
+.env
+.env.local
+.env.*.local
+
+# ━━━ IDE & OS
+*.local
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+
+# ━━━ Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ━━━ Backups & Temp Files ━━━
+*.bak
+*.tmp
+.backup/
+temp/
+
+# ━━━ Database (local D1)
+.wrangler/state/d1
+
+# ━━━ Credentials (if committed by mistake, tell git to ignore)
+.wrangler/credentials.json
+

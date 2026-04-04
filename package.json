@@ -1,0 +1,40 @@
+{
+  "name": "sevadal-attendance",
+  "private": true,
+  "sideEffects": false,
+  "type": "module",
+  "scripts": {
+    "build": "remix vite:build",
+    "deploy": "npm run build && wrangler pages deploy ./build/client",
+    "dev": "remix vite:dev",
+    "typecheck": "tsc",
+    "db:init": "wrangler d1 execute sevadal-db --local --file=./schema.sql",
+    "db:init:prod": "wrangler d1 execute sevadal-db --file=./schema.sql",
+    "db:migrate": "wrangler d1 execute sevadal-db --local --file=./migration.sql",
+    "db:migrate:prod": "wrangler d1 execute sevadal-db --file=./migration.sql",
+    "db:dummy": "wrangler d1 execute sevadal-db --local --file=./dummy-data.sql",
+    "db:migrate:v5": "wrangler d1 execute sevadal-db --local --file=./migration-v5.sql",
+    "db:migrate:v5:prod": "wrangler d1 execute sevadal-db --file=./migration-v5.sql"
+  },
+  "dependencies": {
+    "@remix-run/cloudflare": "^2.15.0",
+    "@remix-run/cloudflare-pages": "^2.15.0",
+    "@remix-run/react": "^2.15.0",
+    "isbot": "^4.4.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250109.0",
+    "@remix-run/dev": "^2.15.0",
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.0",
+    "typescript": "^5.4.5",
+    "vite": "^5.4.11",
+    "vite-tsconfig-paths": "^5.0.1",
+    "wrangler": "^3.101.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

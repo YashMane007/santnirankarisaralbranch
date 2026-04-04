@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Offline — Sevadal Attendance</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'DM Sans', system-ui, sans-serif;
+      min-height: 100dvh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #fff7ed;
+      padding: 24px;
+      text-align: center;
+    }
+    .card {
+      background: white;
+      border-radius: 16px;
+      padding: 40px 32px;
+      max-width: 340px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.1);
+    }
+    .icon { font-size: 52px; margin-bottom: 16px; }
+    h1 { font-size: 22px; font-weight: 700; color: #1c1917; margin-bottom: 8px; }
+    p { font-size: 14px; color: #78716c; line-height: 1.6; margin-bottom: 24px; }
+    button {
+      background: linear-gradient(135deg, #f97316, #c2570a);
+      color: white;
+      border: none;
+      padding: 12px 28px;
+      border-radius: 9999px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">📡</div>
+    <h1>You're offline</h1>
+    <p>No internet connection detected. Please check your network and try again.</p>
+
+    <!-- YM -->
+    <!-- <p>No internet connection detected. We'll automatically try to reconnect you.</p>
+   <div class="status" id="status">
+     <span class="pulse"></span>
+     <span id="statusText">Checking connection...</span>
+   </div> -->
+   <!-- YM -->
+    
+    <button onclick="window.location.reload()">Try Again</button>
+  </div>
+</body>
+</html>
+
+<!-- YM -->
+ <!-- <script>
+   // Auto-check connection every 5 seconds
+   setInterval(() => {
+     fetch('/', { method: 'HEAD' })
+       .then(() => {
+         // Connection restored!
+         window.location.reload();
+       })
+       .catch(() => {
+         // Still offline
+       });
+   }, 5000);
+
+   // Listen for online event
+   window.addEventListener('online', () => {
+     window.location.reload();
+   });
+ </script> -->
+<!-- YM -->

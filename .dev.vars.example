@@ -1,0 +1,20 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# IMPORTANT: Rename this file to ".dev.vars" for local development.
+# Cloudflare Workers NEVER read .env files. Only .dev.vars works locally.
+# For production: use "wrangler secret put <VAR_NAME>" for each variable.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Required — any random 32+ character string
+SESSION_SECRET=change-this-to-a-random-32-char-string
+
+# Optional — Telegram backup bot
+# Get from @BotFather on Telegram
+TELEGRAM_BOT_TOKEN=123456789:AABBccDDeeffGGhhIIjjKKll...
+
+# Get by: adding your bot to a group, then visiting:
+# https://api.telegram.org/bot<TOKEN>/getUpdates
+# Look for "chat": { "id": -100XXXXXXXXX }
+TELEGRAM_CHAT_ID=-100123456789
+
+# Telegram cron worker auth secret (any random string)
+BACKUP_SECRET=change-this-to-random-string

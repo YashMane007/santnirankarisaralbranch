@@ -1,0 +1,40 @@
+/**
+ * Client-safe audit constants.
+ * No .server suffix — safe to import in route components.
+ */
+
+export const ACTION_LABELS: Record<string, string> = {
+  login: "Logged in",
+  logout: "Logged out",
+  pin_changed: "Changed PIN",
+  pin_reset: "PIN reset by admin",
+  member_created: "Created member",
+  member_updated: "Updated member",
+  member_deleted: "Deleted member",
+  member_activated: "Activated member",
+  member_deactivated: "Deactivated member",
+  admin_granted: "Granted admin",
+  admin_removed: "Removed admin",
+  sa_granted: "Granted Super Admin",
+  sa_removed: "Removed Super Admin",
+  bulk_import: "Bulk imported members",
+  location_created: "Created location",
+  location_updated: "Updated location",
+  location_toggled: "Toggled location",
+  schedule_created: "Created schedule",
+  schedule_updated: "Updated schedule",
+  schedule_deleted: "Deleted schedule",
+  attendance_marked: "Marked attendance",
+  attendance_edited: "Edited attendance",
+  attendance_deleted: "Deleted attendance",
+  bulk_attendance_marked: "Bulk marked attendance",
+  announcement_created: "Created announcement",
+  announcement_updated: "Updated announcement",
+  announcement_deleted: "Deleted announcement",
+  setting_changed: "Changed setting",
+  export_downloaded: "Downloaded export",
+  telegram_backup_sent: "Telegram backup sent",
+  database_wiped: "Wiped database",
+  permission_group_created: "Created permission group",
+  permission_updated: "Updated permissions",
+};

@@ -1,0 +1,22 @@
+name = "sevadal-attendance"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = "./build/client"
+
+# ─── D1 Database ───────────────────────────────────────────────────────────────
+# After running: wrangler d1 create sevadal-db
+# Paste the returned database_id below.
+[[d1_databases]]
+binding = "DB"
+database_name = "sevadal-db"
+database_id = "17b5fde2-8457-4896-8377-2c804edd8d43"
+
+# ─── R2 Bucket ─────────────────────────────────────────────────────────────────
+# After running: wrangler r2 bucket create sevadal-media
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "sevadal-media"
+
+# ─── Local Development Vars ────────────────────────────────────────────────────
+# Create .dev.vars with:
+#   SESSION_SECRET=your-random-32-char-string-here
