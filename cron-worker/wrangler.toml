@@ -6,12 +6,12 @@ compatibility_date = "2024-09-23"
 # 12:06 AM IST = 18:36 UTC (IST = UTC + 5:30)
 # Change this to match the time you set in Settings
 [triggers]
-crons = ["36 18 * * *"]
+crons = ["58 08 * * *"]
 
 # ─── Variables ────────────────────────────────────────────────────────────────
 [vars]
 # Replace with your actual live domain after deploying to Cloudflare Pages
-APP_URL = "https://yourdomain.com"
+APP_URL = "https://sevadalattendance.yashmane.xyz"
 
 # ─── Secrets (set via: wrangler secret put BACKUP_SECRET) ────────────────────
 # BACKUP_SECRET — must match the BACKUP_SECRET env var in your main app
