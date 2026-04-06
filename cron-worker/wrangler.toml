@@ -6,7 +6,7 @@ compatibility_date = "2024-09-23"
 # 12:06 AM IST = 18:36 UTC (IST = UTC + 5:30)
 # Change this to match the time you set in Settings
 [triggers]
-crons = ["58 08 * * *"]
+crons = ["12 09 * * *"]
 
 # ─── Variables ────────────────────────────────────────────────────────────────
 [vars]
