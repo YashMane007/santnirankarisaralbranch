@@ -1,10 +1,46 @@
-import { type LoaderFunctionArgs, type MetaFunction, json } from "@remix-run/cloudflare";
-import { Form, Link, useLoaderData } from "@remix-run/react";
+import { type LoaderFunctionArgs, type MetaFunction, json, redirect } from "@remix-run/cloudflare"; //redirect + YM
+import { Form, Link, useLoaderData, useNavigation } from "@remix-run/react";
 import { useState } from "react";
 import { listAnnouncements } from "~/lib/db.server";
 import { getAppSettings } from "~/lib/appsettings.server";
 import { getSession } from "~/lib/session.server";
+import { getKillSwitch, shouldBlock } from "~/lib/killswitch.server";// YM
+import { getMemberById, getTodayAttendanceAll, getMemberMonthAttendanceCount, getMemberTotalAttendanceCount, getMemberAttendanceHistory, markAttendance, listLocations, getActiveSchedulesForDate, listSevaRoles, getLocationsWithAnySchedule, type ScheduleWithLocation } from "~/lib/db.server"; //YM
+import { requireMember } from "~/lib/session.server"; //YM
 import PWAInstallPrompt from "~/components/PWAInstallPrompt";
+
+//YM
+// function todayISO() { return new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}); }
+// function nowHHMM() { return new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",hour12:false,timeZone:"Asia/Kolkata"}).replace(".",":"); }
+// function formatTimeIST(iso:string|null){if(!iso)return"";const u=iso.endsWith("Z")?iso:iso+"Z";return new Date(u).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",timeZone:"Asia/Kolkata"});}
+// function formatDateIST(iso:string){return new Date(iso+"T00:00:00").toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short",year:"numeric"});}
+// function isScheduleActiveNow(s:ScheduleWithLocation,hhmm:string){if(s.all_day)return true;if(!s.start_time||!s.end_time)return true;return hhmm>=s.start_time&&hhmm<=s.end_time;}
+
+// export async function loaderr({ request, context }: LoaderFunctionArgs) {
+//   const { DB, SESSION_SECRET } = context.cloudflare.env;
+//   const session = await requireMember(request, SESSION_SECRET, DB);
+//   if (session.isAdmin || session.isSuperAdmin) throw redirect("/admin");
+
+//   const ks = await getKillSwitch(DB);
+//   const blocked = shouldBlock(ks, "member");
+//   if (blocked) throw redirect("/maintenance");
+
+//   const today = todayISO();
+//   const [member, todayRecords, monthCount, totalCount, history, locations, schedules, sevaRoles, allScheduledLocationIds, announcements, appSettings] =
+//     await Promise.all([
+//       getMemberById(DB,session.memberId), getTodayAttendanceAll(DB,session.memberId,today),
+//       getMemberMonthAttendanceCount(DB,session.memberId,today.slice(0,7)),
+//       getMemberTotalAttendanceCount(DB,session.memberId),
+//       getMemberAttendanceHistory(DB,session.memberId,10),
+//       listLocations(DB,true), getActiveSchedulesForDate(DB,today), listSevaRoles(DB,true),
+//       getLocationsWithAnySchedule(DB),
+//       listAnnouncements(DB, { activeOnly: true, showTo: "member" }),
+//       getAppSettings(DB),
+//     ]);
+//   if (!member) throw redirect("/auth/logout");
+//   return json({ member, todayRecords, monthCount, totalCount, history, locations, schedules, sevaRoles, today, allScheduledLocationIds, announcements, appSettings });
+// }
+//YM
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: `${data?.appName ?? "Sevadal"} — News & Notices` },
@@ -19,12 +55,27 @@ function isImage(key: string) { return /\.(jpg|jpeg|png|webp|gif)$/i.test(key); 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const { DB, SESSION_SECRET } = context.cloudflare.env;
   const session = await getSession(request, SESSION_SECRET);
-  const memberId = session.get("memberId");
-  const isAdmin  = session.get("isAdmin") || session.get("isSuperAdmin");
+  const memberId    = session.get("memberId");
+  const isAdmin     = session.get("isAdmin") || session.get("isSuperAdmin");
+  const isSuperAdmin = session.get("isSuperAdmin");
+
+  // Kill switch checks — use static import (dynamic import with ~/aliases broken on CF Workers)
+  if (!isSuperAdmin) {
+    const ks = await getKillSwitch(DB);
+    if (!memberId && ks.blockGuests)              throw redirect("/maintenance"); // guests
+    if (memberId && !isAdmin && ks.blockMembers)  throw redirect("/maintenance"); // logged-in members
+  }
+
   const [settings, announcements] = await Promise.all([
     getAppSettings(DB),
     listAnnouncements(DB, { activeOnly: true, showTo: memberId ? "member" : "guest" }),
   ]);
+  const headers: HeadersInit = {};
+  // Cache public news for guests at the edge — 60s fresh, 5min stale
+  if (!memberId) {
+    headers["Cache-Control"] = "public, s-maxage=60, stale-while-revalidate=300";
+  }
+
   return json({
     announcements,
     appName: settings.app_name,
@@ -33,12 +84,37 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     footerText: settings.footer_text,
     isMember: !!memberId && !isAdmin,
     isAdmin:  !!isAdmin,
-  });
+  }, { headers });
 }
 
 export default function NewsPage() {
   const { announcements, appName, orgName, banner, footerText, isMember, isAdmin } = useLoaderData<typeof loader>();
+  const nav = useNavigation();
   const [lightbox, setLightbox] = useState<{ imgs: { key: string; name: string }[]; idx: number } | null>(null);
+
+  if (nav.state === "loading") {
+    return (
+      <div className="member-shell">
+        <header style={{ background: "white", borderBottom: "1px solid var(--gray-100)", position: "sticky", top: 0, zIndex: 50, height: "56px", display: "flex", alignItems: "center", padding: "0 16px" }}>
+          <div className="skeleton" style={{ width: 140, height: 20 }}/>
+        </header>
+        <main style={{ maxWidth: "680px", margin: "0 auto", padding: "24px 16px", display: "flex", flexDirection: "column", gap: 20 }}>
+          <div className="skeleton skeleton-title" style={{ width: "40%" }}/>
+          {[0,1,2].map(i=>(
+            <div key={i} className="card" style={{ overflow: "hidden" }}>
+              <div className="skeleton skeleton-img"/>
+              <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+                <div className="skeleton skeleton-title" style={{ width: "70%" }}/>
+                <div className="skeleton skeleton-text"/>
+                <div className="skeleton skeleton-text" style={{ width: "80%" }}/>
+                <div className="skeleton skeleton-text" style={{ width: "30%", marginTop: 4 }}/>
+              </div>
+            </div>
+          ))}
+        </main>
+      </div>
+    );
+  }
 
   const openLightbox = (imgs: { key: string; name: string }[], idx = 0) => setLightbox({ imgs, idx });
   const closeLightbox = () => setLightbox(null);
@@ -98,6 +174,8 @@ export default function NewsPage() {
                     <img
                       src={`/api/photo/${encodeURIComponent(imgs[0].key)}`}
                       alt={a.title}
+                      loading="lazy"
+                      decoding="async"
                       style={{ width: "100%", maxHeight: "280px", objectFit: "contain", background: "var(--gray-50)", display: "block" }}
                       onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
                     />
@@ -121,6 +199,7 @@ export default function NewsPage() {
                   <div style={{ display: "flex", gap: "4px", padding: "6px 10px", background: "var(--gray-50)", borderBottom: "1px solid var(--gray-100)", overflowX: "auto" }}>
                     {imgs.map((img, i) => (
                       <img key={img.key} src={`/api/photo/${encodeURIComponent(img.key)}`} alt=""
+                        loading="lazy" decoding="async"
                         onClick={() => openLightbox(imgs, i)}
                         style={{ height: "48px", width: "60px", objectFit: "cover", borderRadius: "4px", cursor: "pointer", flexShrink: 0, border: "2px solid transparent" }}
                         onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}

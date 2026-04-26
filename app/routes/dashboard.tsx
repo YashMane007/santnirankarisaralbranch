@@ -2,6 +2,7 @@ import { type ActionFunctionArgs, type LoaderFunctionArgs, type MetaFunction, js
 import { Form, Link, useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { useCallback, useEffect, useState } from "react";
 import { requireMember } from "~/lib/session.server";
+import PWAInstallPrompt from "~/components/PWAInstallPrompt";
 import { getMemberById, getTodayAttendanceAll, getMemberMonthAttendanceCount, getMemberTotalAttendanceCount, getMemberAttendanceHistory, markAttendance, listLocations, getActiveSchedulesForDate, listSevaRoles, getLocationsWithAnySchedule, type ScheduleWithLocation } from "~/lib/db.server";
 import { checkGeofence } from "~/lib/geofence";
 import { checkRateLimit } from "~/lib/ratelimit.server";
@@ -65,8 +66,23 @@ export async function action({ request, context }: ActionFunctionArgs) {
   if (isNaN(lat)||isNaN(lng)) return json({error:"Cannot get location. Enable GPS."},{status:400});
   if (!finalSeva) return json({error:"⚠️ Please select your Seva Role before marking attendance."},{status:400});
   const today=todayISO();
-  const locations=await listLocations(DB,true);
-  const geo=checkGeofence(lat,lng,locations);
+  const [allLocations, allScheduledLocIds] = await Promise.all([
+    listLocations(DB,true),
+    getLocationsWithAnySchedule(DB),
+  ]);
+  // Determine which locations to geofence against based on selected sessions
+  let checkLocations = allLocations;
+  if (scheduleIds.length===1 && scheduleIds[0]===0) {
+    // Open Seva only — check against locations with NO schedules
+    checkLocations = allLocations.filter(l=>!allScheduledLocIds.includes(l.id));
+  } else {
+    // Specific scheduled sessions — check only against those sessions' locations
+    const schedules = await getActiveSchedulesForDate(DB, today);
+    const selScheds = schedules.filter(s=>scheduleIds.includes(s.id));
+    const locIds = [...new Set(selScheds.map(s=>s.location_id))];
+    if (locIds.length>0) checkLocations = allLocations.filter(l=>locIds.includes(l.id));
+  }
+  const geo=checkGeofence(lat,lng,checkLocations);
   if (!geo) return json({error:"No active locations found."},{status:400});
   if (!geo.allowed) return json({error:`You are ${geo.distanceMeters}m from ${geo.locationName}. Must be within ${geo.radiusMeters}m.`},{status:403});
   const member=await getMemberById(DB,session.memberId);
@@ -87,7 +103,41 @@ export default function DashboardPage() {
   const actionData = useActionData<typeof action>() as any;
   const nav = useNavigation();
   const submitting = nav.state==="submitting";
+  const loading = nav.state==="loading";
+
+  if (loading) {
+    return (
+      <div className="member-shell">
+        <header className="member-header">
+          <div className="member-header__logo">
+            <div className="member-header__logo-mark">🙏</div>
+            <span className="member-header__title">Sevadal</span>
+          </div>
+          <div className="skeleton skeleton-avatar" style={{width:32,height:32}}/>
+        </header>
+        <main className="member-content">
+          <div className="skeleton skeleton-hero" style={{height:110}}/>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"1px",background:"var(--gray-100)"}}>
+            {[0,1,2].map(i=><div key={i} style={{background:"white",padding:"14px 8px",display:"flex",flexDirection:"column",alignItems:"center",gap:8}}><div className="skeleton skeleton-text" style={{width:40,height:22}}/><div className="skeleton skeleton-text" style={{width:60,height:11}}/></div>)}
+          </div>
+          <div className="skeleton-section">
+            <div className="skeleton" style={{height:44}}/>
+            <div className="skeleton skeleton-card"/>
+            <div className="skeleton skeleton-card"/>
+            <div className="skeleton" style={{height:52,borderRadius:"var(--radius-sm)"}}/>
+            <div className="skeleton skeleton-btn"/>
+          </div>
+        </main>
+        <nav className="bottom-nav">
+          <div className="bottom-nav__item active"><div className="skeleton" style={{width:22,height:22,borderRadius:4}}/><div className="skeleton skeleton-text" style={{width:50,height:9}}/></div>
+          <div className="bottom-nav__item"><div className="skeleton" style={{width:22,height:22,borderRadius:4}}/><div className="skeleton skeleton-text" style={{width:40,height:9}}/></div>
+          <div className="bottom-nav__item"><div className="skeleton" style={{width:22,height:22,borderRadius:4}}/><div className="skeleton skeleton-text" style={{width:44,height:9}}/></div>
+        </nav>
+      </div>
+    );
+  }
   const [gps, setGps] = useState<GpsState>({status:"idle"});
+  const [sevaRoleError, setSevaRoleError] = useState(false);
   const requestGps = useCallback(()=>{
     setGps({status:"loading"});
     navigator.geolocation.getCurrentPosition(
@@ -198,20 +248,21 @@ export default function DashboardPage() {
             )}
 
             {actionData?.error&&<div className="alert alert-error"><span>⚠️</span><span>{actionData.error}</span></div>}
+            {sevaRoleError&&<div className="alert alert-error"><span>⚠️</span><span>Please select your Seva Role before marking attendance.</span></div>}
 
             {gps.status!=="success"?(
               <button type="button" className="attend-btn attend-btn-disabled" onClick={requestGps} style={{cursor:"pointer"}}>📍 Get My Location First</button>
             ):selectedIds.size===0?(
               <div className="attend-btn attend-btn-done">All sessions marked ✓</div>
             ):(
-              <Form method="post">
+              <Form method="post" onSubmit={e=>{const role=sevaRole==="__custom__"?customSeva:sevaRole;if(!role){e.preventDefault();setSevaRoleError(true);return;}setSevaRoleError(false);}}>
                 <input type="hidden" name="lat" value={gps.status==="success"?gps.lat:""}/>
                 <input type="hidden" name="lng" value={gps.status==="success"?gps.lng:""}/>
                 <input type="hidden" name="accuracy" value={gps.status==="success"?gps.accuracy:""}/>
                 <input type="hidden" name="sevaRole" value={sevaRole}/>
                 <input type="hidden" name="customSevaRole" value={customSeva}/>
                 <input type="hidden" name="scheduleIds" value={JSON.stringify(Array.from(selectedIds))}/>
-                <button type="submit" className="attend-btn attend-btn-active" disabled={submitting||!sevaRole}>
+                <button type="submit" className="attend-btn attend-btn-active" disabled={submitting}>
                   {submitting?<><span className="spinner" style={{borderTopColor:"white"}}/> Marking…</>:"✅ Mark Present"}
                 </button>
               </Form>
@@ -268,6 +319,11 @@ export default function DashboardPage() {
           <div style={{height:"16px"}}/>
         </>)}
       </main>
+
+      {/* PWA install prompt — shows to logged-in members on Android/iOS */}
+      <div style={{ maxWidth: "var(--mobile-max)", margin: "0 auto", padding: "0 16px 8px" }}>
+        <PWAInstallPrompt />
+      </div>
 
       <nav className="bottom-nav">
         <Link to="/dashboard" className="bottom-nav__item active">

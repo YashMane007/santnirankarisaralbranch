@@ -3,10 +3,11 @@ main = "index.ts"
 compatibility_date = "2024-09-23"
 
 # ─── Cron schedule ─────────────────────────────────────────────────────────────
-# 12:06 AM IST = 18:36 UTC (IST = UTC + 5:30)
-# Change this to match the time you set in Settings
+# Runs every 30 minutes. The /api/telegram-backup endpoint checks the
+# configured IST backup time (set in Admin → Settings) and only sends
+# within ±20 min of that time. Change time in admin UI — no redeploy needed.
 [triggers]
-crons = ["12 09 * * *"]
+crons = ["*/30 * * * *"]
 
 # ─── Variables ────────────────────────────────────────────────────────────────
 [vars]

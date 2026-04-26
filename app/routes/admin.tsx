@@ -4,7 +4,7 @@
  * This eliminates the nav-shuffling bug: sidebar defined ONCE here.
  */
 import { type LoaderFunctionArgs, json, redirect } from "@remix-run/cloudflare";
-import { Form, Link, Outlet, useLocation, useRouteLoaderData } from "@remix-run/react";
+import { Form, Link, Outlet, useLocation, useRouteLoaderData, useNavigation } from "@remix-run/react";
 import { useState, useEffect } from "react";
 import { requireAdmin } from "~/lib/session.server";
 import { getKillSwitch, shouldBlock } from "~/lib/killswitch.server";
@@ -100,6 +100,19 @@ function SidebarInner({ adminName, isSuperAdmin, onLinkClick }: { adminName:stri
   );
 }
 
+function AdminLoadingBar() {
+  const nav = useNavigation();
+  if (nav.state === "idle") return null;
+  return (
+    <div style={{
+      position:"fixed", top:0, left:0, right:0, height:"3px", zIndex:9999,
+      background:"linear-gradient(90deg,var(--saffron-400),var(--saffron-700),var(--saffron-400))",
+      backgroundSize:"400px 100%",
+      animation:"shimmer 1.2s infinite linear",
+    }}/>
+  );
+}
+
 export default function AdminLayout() {
   const { adminName, isSuperAdmin, banner } = useRouteLoaderData("routes/admin") as AdminLayoutData;
   const [open, setOpen] = useState(false);
@@ -131,12 +144,13 @@ export default function AdminLayout() {
       </button>
 
       {/* Content rendered by child routes */}
-      <div className="admin-main">
+      <div className="admin-main" style={{ position: "relative" }}>
         {banner && (
           <div style={{background:"var(--saffron-600)",color:"white",textAlign:"center",padding:"7px 16px",fontSize:"13px",fontWeight:"500"}}>
             📢 {banner}
           </div>
         )}
+        <AdminLoadingBar />
         <Outlet />
       </div>
     </div>

@@ -3,7 +3,7 @@ import { Form, useActionData, useLoaderData, useNavigation } from "@remix-run/re
 import { useState } from "react";
 import { LocationPicker } from "~/components/LocationPicker";
 import { requireAdmin } from "~/lib/session.server";
-import { createLocation, listLocations, updateLocation, getSchedulesForLocation, createLocationSchedule, updateLocationSchedule, deleteLocationSchedule, listSatsangTypes, type LocationSchedule } from "~/lib/db.server";
+import { createLocation, listLocations, updateLocation, deleteLocation, getSchedulesForLocation, createLocationSchedule, updateLocationSchedule, deleteLocationSchedule, listSatsangTypes, type LocationSchedule } from "~/lib/db.server";
 import { getAdminPermissions, can } from "~/lib/permissions.server";
 import { logAudit, getClientIp } from "~/lib/audit.server";
 
@@ -76,6 +76,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
     await updateLocationSchedule(DB,id,{label:(form.get("label") as string)||undefined,satsang_type_name:(form.get("satsang_type") as string)||undefined,date:(form.get("date") as string)||undefined,all_day:allDay?1:0,start_time:allDay?null:(form.get("start_time") as string)||undefined,end_time:allDay?null:(form.get("end_time") as string)||undefined});
     await logAudit(DB,{ actorId:session.memberId, actorName:session.memberName, actorRole:session.isSuperAdmin?"super_admin":"admin", action:"schedule_updated", targetType:"schedule", targetId:String(id), ip });
     return json({actionSuccess:"Schedule updated."});
+  }
+  if (intent==="delete-location") {
+    if (!can(perms,"edit_locations")) return json({actionError:"You do not have permission to delete locations."});
+    const id=parseInt(form.get("locationId") as string);
+    await deleteLocation(DB,id);
+    await logAudit(DB,{ actorId:session.memberId, actorName:session.memberName, actorRole:session.isSuperAdmin?"super_admin":"admin", action:"location_deleted", targetType:"location", targetId:String(id), ip });
+    return json({actionSuccess:"Location deleted."});
   }
   if (intent==="delete-schedule") {
     if (!can(perms,"delete_schedules")) return json({actionError:"You do not have permission to delete schedules."});
@@ -158,7 +165,7 @@ export default function AdminLocationsPage() {
                     ))}
                   </div>
 
-                  <div style={{display:"flex",gap:"8px"}}>
+                  <div style={{display:"flex",gap:"8px",flexWrap:"wrap"}}>
                     <button type="button" className="btn btn-sm btn-secondary" onClick={()=>setEditLoc(loc)} title="Edit location name, address, GPS coordinates or radius">✏️ Edit</button>
                     <Form method="post">
                       <input type="hidden" name="intent" value="toggle-location"/>
@@ -167,6 +174,11 @@ export default function AdminLocationsPage() {
                       <button type="submit" className={`btn btn-sm ${loc.is_active?"btn-danger":"btn-secondary"}`} title={loc.is_active?"Deactivate — members cannot mark attendance here":"Activate location"}>
                         {loc.is_active?"Deactivate":"Activate"}
                       </button>
+                    </Form>
+                    <Form method="post" onSubmit={e=>{if(!confirm(`Delete "${loc.name}"? This removes all schedules too and cannot be undone.`))e.preventDefault();}}>
+                      <input type="hidden" name="intent" value="delete-location"/>
+                      <input type="hidden" name="locationId" value={loc.id}/>
+                      <button type="submit" className="btn btn-sm btn-danger" title="Permanently delete this location and all its schedules">🗑️ Delete</button>
                     </Form>
                   </div>
                 </div>

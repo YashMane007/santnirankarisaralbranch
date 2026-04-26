@@ -21,19 +21,21 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const { DB } = context.cloudflare.env;
   const url      = new URL(request.url);
   const date     = url.searchParams.get("date")       || todayISO();
+  const toDate   = url.searchParams.get("toDate")     || date;  // date range end
   const page     = parseInt(url.searchParams.get("page")||"1");
   const tab      = url.searchParams.get("tab")        || "present";
   const search   = url.searchParams.get("search")     || "";
   const filterRole = url.searchParams.get("role")     || "";
   const filterLoc  = url.searchParams.get("loc")      || "";
-  const filterSess = url.searchParams.get("sess")     || "";   // NEW: session filter
+  const filterSess = url.searchParams.get("sess")     || "";
   const sortBy   = url.searchParams.get("sortBy")     || "marked_at";
   const sortDir  = (url.searchParams.get("sortDir")   || "desc") as "asc"|"desc";
   const absSortBy  = url.searchParams.get("absSortBy")|| "name";
   const absSortDir = (url.searchParams.get("absSortDir")||"asc") as "asc"|"desc";
+  const isRange  = toDate !== date;
 
   const [presentData, absentList, allMembers, locations, sevaRoles] = await Promise.all([
-    getAttendanceLog(DB, date, page, PAGE, { sevaRole:filterRole||undefined, location:filterLoc||undefined, search:search||undefined, sortBy, sortDir }),
+    getAttendanceLog(DB, date, page, PAGE, { sevaRole:filterRole||undefined, location:filterLoc||undefined, search:search||undefined, sortBy, sortDir, toDate: isRange ? toDate : undefined }),
     getAbsentList(DB, date, { search:search||undefined, sortBy:absSortBy, sortDir:absSortDir }),
     listMembers(DB,{ activeOnly:true }),
     listLocations(DB, true),
@@ -46,7 +48,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   // Session filter applied client-side from distinct values
   const allSessions = Array.from(new Set(presentData.records.map(r=>r.session_label).filter(Boolean)));
 
-  return json({ presentRecords:presentData.records, presentTotal:presentData.total, absentList, date, page, totalPages:Math.ceil(presentData.total/PAGE), tab, search, filterRole, filterLoc, filterSess, sortBy, sortDir, absSortBy, absSortDir, members, locations, sevaRoles, allSessions });
+  return json({ presentRecords:presentData.records, presentTotal:presentData.total, absentList, date, toDate, isRange, page, totalPages:Math.ceil(presentData.total/PAGE), tab, search, filterRole, filterLoc, filterSess, sortBy, sortDir, absSortBy, absSortDir, members, locations, sevaRoles, allSessions });
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
@@ -124,7 +126,7 @@ function SortTh({col,label,sortBy,sortDir,onSort}:{col:string;label:string;sortB
 }
 
 export default function AdminAttendancePage() {
-  const { presentRecords, presentTotal, absentList, date, page, totalPages, tab, search, filterRole, filterLoc, filterSess, sortBy, sortDir, absSortBy, absSortDir, members, locations, sevaRoles, allSessions } = useLoaderData<typeof loader>();
+  const { presentRecords, presentTotal, absentList, date, toDate, isRange, page, totalPages, tab, search, filterRole, filterLoc, filterSess, sortBy, sortDir, absSortBy, absSortDir, members, locations, sevaRoles, allSessions } = useLoaderData<typeof loader>();
   const { isSuperAdmin, adminId, adminName } = useAdminLayout();
   const ad = useActionData<typeof action>() as any;
   const [sp,setSp] = useSearchParams();
@@ -147,9 +149,15 @@ export default function AdminAttendancePage() {
   return (
     <>
       <div className="admin-topbar" style={{flexWrap:"wrap",gap:"8px",minHeight:"auto",padding:"10px 24px"}}>
-        <h1 className="admin-topbar__title">Attendance — {fmtDate(date)}</h1>
+        <h1 className="admin-topbar__title">Attendance — {isRange ? `${fmtDate(date)} to ${fmtDate(toDate)}` : fmtDate(date)}</h1>
         <div style={{display:"flex",gap:"8px",flexWrap:"wrap",alignItems:"center"}}>
-          <input type="date" value={date} max={isSuperAdmin?undefined:today} className="form-input" style={{width:"auto"}} onChange={e=>set("date",e.target.value)} title="Select date to view attendance"/>
+          <div style={{display:"flex",alignItems:"center",gap:"4px"}}>
+            <label style={{fontSize:"11px",color:"var(--gray-500)",fontWeight:600}}>From</label>
+            <input type="date" value={date} max={isSuperAdmin?undefined:today} className="form-input" style={{width:"auto"}} onChange={e=>{const n=new URLSearchParams(sp);n.set("date",e.target.value);if(toDate<e.target.value)n.set("toDate",e.target.value);n.set("page","1");setSp(n);}} title="Start date"/>
+            <label style={{fontSize:"11px",color:"var(--gray-500)",fontWeight:600}}>To</label>
+            <input type="date" value={toDate} min={date} max={isSuperAdmin?undefined:today} className="form-input" style={{width:"auto"}} onChange={e=>set("toDate",e.target.value)} title="End date (leave same as From for single day)"/>
+            {isRange && <button type="button" className="btn btn-secondary btn-sm" onClick={()=>{const n=new URLSearchParams(sp);n.set("toDate",date);n.set("page","1");setSp(n);}} title="Clear range">✕</button>}
+          </div>
           <button className="btn btn-secondary btn-md" onClick={()=>setShowBulk(true)} title="Mark multiple members present from a list">📋 Mark List</button>
           <button className="btn btn-primary btn-md"   onClick={()=>setShowMark(true)} title="Mark a single member present">✅ Mark Single</button>
         </div>
@@ -159,9 +167,16 @@ export default function AdminAttendancePage() {
         {ad?.markSuccess&&<div className="alert alert-success" style={{marginBottom:"16px"}}>✅ {ad.markSuccess}</div>}
         {ad?.markError  &&<div className="alert alert-error"   style={{marginBottom:"16px"}}>⚠️ {ad.markError}</div>}
 
+        {/* Range mode info banner */}
+        {isRange && (
+          <div style={{background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:"var(--radius-sm)",padding:"8px 12px",marginBottom:"12px",fontSize:"12px",color:"#c2410c"}}>
+            📅 Range: <strong>{fmtDate(date)}</strong> → <strong>{fmtDate(toDate)}</strong> &nbsp;·&nbsp; {presentTotal} records total. Absent tab hidden in range view.
+          </div>
+        )}
+
         {/* Tabs */}
         <div style={{display:"flex",borderBottom:"2px solid var(--gray-100)",marginBottom:"20px"}}>
-          {[{key:"present",label:`Present (${presentTotal})`},{key:"absent",label:`Absent (${absentList.length})`}].map(t=>(
+          {[{key:"present",label:`Present (${presentTotal})`},...(!isRange?[{key:"absent",label:`Absent (${absentList.length})`}]:[])].map(t=>(
             <button key={t.key} type="button" onClick={()=>set("tab",t.key)}
               style={{padding:"10px 20px",border:"none",cursor:"pointer",fontFamily:"var(--font-body)",fontSize:"14px",fontWeight:tab===t.key?"700":"400",borderBottom:tab===t.key?"2px solid var(--primary)":"2px solid transparent",marginBottom:"-2px",background:"none",color:tab===t.key?"var(--primary)":"var(--gray-500)"}}>
               {t.label}
@@ -186,7 +201,7 @@ export default function AdminAttendancePage() {
             </select>
           </>}
           {/* FIX: plain <a> not <Link> — bypasses Remix router, browser handles CSV download natively */}
-          <a href={`/api/export?from=${date}&to=${date}`} className="btn btn-secondary btn-md" title="Download today's attendance as CSV file">📥 Export This Day</a>
+          <a href={`/api/export?from=${date}&to=${toDate}`} className="btn btn-secondary btn-md" title={isRange?"Export date range as CSV":"Export this day as CSV"}>📥 {isRange ? "Export Range" : "Export This Day"}</a>
         </div>
 
         {/* Present tab */}
@@ -195,6 +210,7 @@ export default function AdminAttendancePage() {
             <div className="table-wrap"><table>
               <thead><tr>
                 <th>#</th>
+                {isRange && <th style={{whiteSpace:"nowrap",fontSize:"11px"}}>Date</th>}
                 <SortTh col="member_name"  label="Name"       sortBy={sortBy} sortDir={sortDir} onSort={sortPresent}/>
                 <SortTh col="member_id"    label="ID"         sortBy={sortBy} sortDir={sortDir} onSort={sortPresent}/>
                 <SortTh col="seva_role"    label="Seva Role"  sortBy={sortBy} sortDir={sortDir} onSort={sortPresent}/>
@@ -210,6 +226,7 @@ export default function AdminAttendancePage() {
                 {displayed.map((r,i)=>(
                   <tr key={r.id}>
                     <td style={{color:"var(--gray-400)",fontSize:"12px"}}>{(page-1)*PAGE+i+1}</td>
+                    {isRange && <td style={{fontSize:"11px",color:"var(--gray-500)",whiteSpace:"nowrap"}}>{fmtDate(r.date)}</td>}
                     <td style={{fontWeight:"600"}}>{r.member_name??"—"}</td>
                     <td><code style={{fontSize:"12px",background:"var(--gray-100)",padding:"2px 6px",borderRadius:"4px"}}>{r.member_id}</code></td>
                     <td>{r.seva_role??"—"}</td>

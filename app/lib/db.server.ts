@@ -102,6 +102,11 @@ export async function updateLocation(db: D1Database, id: number, data: Partial<{
   await db.prepare(`UPDATE locations SET ${fields.join(", ")} WHERE id=?`).bind(...values,id).run();
 }
 
+export async function deleteLocation(db: D1Database, id: number): Promise<void> {
+  await db.prepare("DELETE FROM location_schedules WHERE location_id=?").bind(id).run();
+  await db.prepare("DELETE FROM locations WHERE id=?").bind(id).run();
+}
+
 // ─── Location Schedules ───────────────────────────────────────────────────────
 export async function getSchedulesForLocation(db: D1Database, locationId: number): Promise<LocationSchedule[]> {
   return (await db.prepare("SELECT * FROM location_schedules WHERE location_id=? ORDER BY date DESC, start_time ASC").bind(locationId).all<LocationSchedule>()).results;
@@ -172,9 +177,15 @@ export async function getDailyStats(db: D1Database, date: string): Promise<Daily
   return { uniquePresentCount:uniqRow?.cnt??0, sessionAttendanceCount:sessionRow?.cnt??0, totalActive:totalRow?.cnt??0, byRole:byRole.results, byLocation:byLocation.results };
 }
 
-export async function getAttendanceLog(db: D1Database, date: string, page=1, pageSize=50, filters:{sevaRole?:string;location?:string;search?:string;sortBy?:string;sortDir?:"asc"|"desc"}={}): Promise<{records:AttendanceRecord[];total:number}> {
+export async function getAttendanceLog(db: D1Database, date: string, page=1, pageSize=50, filters:{sevaRole?:string;location?:string;search?:string;sortBy?:string;sortDir?:"asc"|"desc";toDate?:string}={}): Promise<{records:AttendanceRecord[];total:number}> {
   const offset=(page-1)*pageSize;
-  const clauses=["a.date = ?"]; const b:(string|number)[]=[date];
+  // Support date range: if toDate provided, use BETWEEN
+  const clauses = filters.toDate && filters.toDate !== date
+    ? ["a.date >= ? AND a.date <= ?"]
+    : ["a.date = ?"];
+  const b:(string|number)[] = filters.toDate && filters.toDate !== date
+    ? [date, filters.toDate]
+    : [date];
   if (filters.sevaRole) { clauses.push("a.seva_role = ?"); b.push(filters.sevaRole); }
   if (filters.location) { clauses.push("a.location_name = ?"); b.push(filters.location); }
   if (filters.search)   { clauses.push("(a.member_name LIKE ? OR a.member_id LIKE ?)"); b.push(`%${filters.search}%`,`%${filters.search}%`); }

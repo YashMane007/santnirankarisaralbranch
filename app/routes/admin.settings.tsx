@@ -53,7 +53,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
   if (intent === "kill-switch") {
     const blockMembers = form.getAll("blockMembers").includes("1");
     const blockAdmins  = form.getAll("blockAdmins").includes("1");
-    await setKillSwitch(DB, { blockMembers, blockAdmins, message: (form.get("message") as string)?.trim() || "Site is under maintenance." });
+    const blockLogin   = form.getAll("blockLogin").includes("1");
+    const blockGuests  = form.getAll("blockGuests").includes("1");
+    await setKillSwitch(DB, { blockMembers, blockAdmins, blockLogin, blockGuests, message: (form.get("message") as string)?.trim() || "Site is under maintenance." });
     return json({ success: "Kill switch saved." });
   }
 
@@ -161,7 +163,7 @@ export default function AdminSettingsPage() {
         {ad?.error   && <div className="alert alert-error">Error {ad.error}</div>}
 
         <Section title="App Identity">
-          <Form method="post" style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+          <Form method="post" preventScrollReset style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
             <input type="hidden" name="intent" value="app-settings" />
             <div className="form-group"><label className="form-label">App Name</label><input name="app_name" type="text" className="form-input" defaultValue={appSettings.app_name} /></div>
             <div className="form-group"><label className="form-label">Organization Name</label><input name="org_name" type="text" className="form-input" defaultValue={appSettings.org_name} /></div>
@@ -177,7 +179,7 @@ export default function AdminSettingsPage() {
             <div style={{ fontWeight:"700", color:anyKS?"var(--error)":"var(--success)" }}>{anyKS?"Maintenance Mode ACTIVE":"Site is LIVE"}</div>
             <div style={{ fontSize:"12px", color:"var(--gray-500)" }}>Super admins always bypass.</div>
           </div>
-          <Form method="post" style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+          <Form method="post" preventScrollReset style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
             <input type="hidden" name="intent" value="kill-switch" />
             <label style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px", border:"1px solid var(--gray-200)", borderRadius:"var(--radius-sm)" }}>
               <div><div style={{ fontWeight:"600" }}>Block Members</div><div style={{ fontSize:"12px", color:"var(--gray-400)" }}>Members see maintenance page</div></div>
@@ -186,6 +188,14 @@ export default function AdminSettingsPage() {
             <label style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px", border:"1px solid var(--gray-200)", borderRadius:"var(--radius-sm)" }}>
               <div><div style={{ fontWeight:"600" }}>Block Normal Admins</div><div style={{ fontSize:"12px", color:"var(--gray-400)" }}>Admins see maintenance page, SA bypass</div></div>
               <input type="checkbox" name="blockAdmins" value="1" defaultChecked={ks.blockAdmins} style={{ width:"18px", height:"18px" }} />
+            </label>
+            <label style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px", border:"1px solid var(--gray-200)", borderRadius:"var(--radius-sm)" }}>
+              <div><div style={{ fontWeight:"600" }}>Block Login Page</div><div style={{ fontSize:"12px", color:"var(--gray-400)" }}>Redirect /auth/login → maintenance (use /auth/super-login to access)</div></div>
+              <input type="checkbox" name="blockLogin" value="1" defaultChecked={ks.blockLogin} style={{ width:"18px", height:"18px" }} />
+            </label>
+            <label style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px", border:"1px solid var(--gray-200)", borderRadius:"var(--radius-sm)" }}>
+              <div><div style={{ fontWeight:"600" }}>Block News / Guest Page</div><div style={{ fontSize:"12px", color:"var(--gray-400)" }}>Public visitors can't see /news — redirected to maintenance</div></div>
+              <input type="checkbox" name="blockGuests" value="1" defaultChecked={ks.blockGuests} style={{ width:"18px", height:"18px" }} />
             </label>
             <div className="form-group"><label className="form-label">Maintenance Message</label><textarea name="message" className="form-textarea" rows={2} defaultValue={ks.message} /></div>
             <button type="submit" className="btn btn-primary btn-md" disabled={sub}>Save Kill Switch</button>
@@ -201,7 +211,7 @@ export default function AdminSettingsPage() {
             <code style={{display:"block",background:"var(--gray-100)",padding:"6px 10px",borderRadius:"4px",margin:"6px 0",fontFamily:"monospace",fontSize:"11px",whiteSpace:"pre"}}>{"wrangler secret put TELEGRAM_BOT_TOKEN\nwrangler secret put TELEGRAM_CHAT_ID\nwrangler secret put BACKUP_SECRET"}</code>
             Last backup: <strong>{appSettings.telegram_last_backup ? new Date(appSettings.telegram_last_backup).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"}) : "Never"}</strong>
           </div>
-          <Form method="post" style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+          <Form method="post" preventScrollReset style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
             <input type="hidden" name="intent" value="telegram-settings" />
             <label style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px", border:"1px solid var(--gray-200)", borderRadius:"var(--radius-sm)" }}>
               <div><div style={{ fontWeight:"600" }}>Enable Telegram Backup</div><div style={{ fontSize:"12px", color:"var(--gray-400)" }}>Send CSV+PDF daily</div></div>
@@ -223,7 +233,7 @@ export default function AdminSettingsPage() {
               <button type="submit" className="btn btn-primary btn-md" disabled={sub}>Save</button>
             </div>
           </Form>
-          <Form method="post" style={{ marginTop:"10px" }}>
+          <Form method="post" preventScrollReset style={{ marginTop:"10px" }}>
             <input type="hidden" name="intent" value="test-telegram" />
             <button type="submit" className="btn btn-secondary btn-md" disabled={sub}>📨 Send Test Message</button>
           </Form>
@@ -231,7 +241,7 @@ export default function AdminSettingsPage() {
         </Section>
 
         <Section title="Audit Log">
-          <Form method="post" style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+          <Form method="post" preventScrollReset style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
             <input type="hidden" name="intent" value="audit-settings" />
             <label style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px", border:"1px solid var(--gray-200)", borderRadius:"var(--radius-sm)" }}>
               <div><div style={{ fontWeight:"600" }}>Enable Audit Logging</div><div style={{ fontSize:"12px", color:"var(--gray-400)" }}>Record all user actions</div></div>
@@ -241,13 +251,13 @@ export default function AdminSettingsPage() {
             <button type="submit" className="btn btn-primary btn-md" disabled={sub}>Save</button>
           </Form>
           <div style={{ display:"flex", gap:"10px", marginTop:"14px", flexWrap:"wrap" }}>
-            <Form method="post"><input type="hidden" name="intent" value="purge-audit"/><input type="hidden" name="purge_days" value="90"/><button type="submit" className="btn btn-secondary btn-md" disabled={sub}>Purge &gt;90 days</button></Form>
-            <Form method="post" onSubmit={e=>{if(!confirm("Wipe entire audit log?"))e.preventDefault();}}><input type="hidden" name="intent" value="wipe-audit"/><button type="submit" className="btn btn-danger btn-md" disabled={sub}>Wipe All Logs</button></Form>
+            <Form method="post" preventScrollReset><input type="hidden" name="intent" value="purge-audit"/><input type="hidden" name="purge_days" value="90"/><button type="submit" className="btn btn-secondary btn-md" disabled={sub}>Purge &gt;90 days</button></Form>
+            <Form method="post" preventScrollReset onSubmit={e=>{if(!confirm("Wipe entire audit log?"))e.preventDefault();}}><input type="hidden" name="intent" value="wipe-audit"/><button type="submit" className="btn btn-danger btn-md" disabled={sub}>Wipe All Logs</button></Form>
           </div>
         </Section>
 
         <Section title="Misc">
-          <Form method="post" style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
+          <Form method="post" preventScrollReset style={{ display:"flex", flexDirection:"column", gap:"14px" }}>
             <input type="hidden" name="intent" value="misc-settings" />
             <label style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px", border:"1px solid var(--gray-200)", borderRadius:"var(--radius-sm)" }}>
               <div><div style={{ fontWeight:"600" }}>Record GPS Location History</div><div style={{ fontSize:"12px", color:"var(--gray-400)" }}>Store member GPS path when marking attendance</div></div>
@@ -297,7 +307,7 @@ export default function AdminSettingsPage() {
         <div className="modal-backdrop" onClick={e=>{if(e.target===e.currentTarget)setShowWipe(false);}}>
           <div className="modal-box">
             <div className="modal-header"><h3 style={{ color:"var(--error)" }}>Confirm Database Wipe</h3><button className="modal-close" type="button" onClick={()=>setShowWipe(false)}>x</button></div>
-            <Form method="post" onSubmit={()=>setShowWipe(false)}>
+            <Form method="post" preventScrollReset onSubmit={()=>setShowWipe(false)}>
               <div className="modal-body">
                 <input type="hidden" name="intent" value="wipe-database" />
                 <div className="alert alert-error" style={{ marginBottom:"14px" }}>This permanently deletes all attendance data. Cannot be undone.</div>

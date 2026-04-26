@@ -1,3 +1,11 @@
+/**
+ * /auth/super-login
+ *
+ * A low-profile login page exclusively for Super Admins.
+ * Accessible even when the kill switch is fully ON (both members & admins blocked).
+ * Regular members/admins are rejected here — they must use /auth/login.
+ * Not linked from any public page; SA knows this URL.
+ */
 import {
   type ActionFunctionArgs,
   type LoaderFunctionArgs,
@@ -5,32 +13,28 @@ import {
   json,
   redirect,
 } from "@remix-run/cloudflare";
-import { Form, Link, useActionData, useNavigation } from "@remix-run/react";
+import { Form, useActionData, useNavigation } from "@remix-run/react";
 import { getMemberById } from "~/lib/db.server";
 import { verifyPin } from "~/lib/auth.server";
 import { commitSession, getSession } from "~/lib/session.server";
 import { logAudit, getClientIp } from "~/lib/audit.server";
 import { checkRateLimit } from "~/lib/ratelimit.server";
-import { getKillSwitch } from "~/lib/killswitch.server";
 
 export const meta: MetaFunction = () => [
-  { title: "Login — Sevadal Attendance" },
+  { title: "Admin Access — Sevadal" },
 ];
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
-  const { DB, SESSION_SECRET } = context.cloudflare.env;
+  const { SESSION_SECRET } = context.cloudflare.env;
   const session = await getSession(request, SESSION_SECRET);
 
-  // Already logged in → redirect
-  if (session.get("memberId")) {
-    const isAdmin = session.get("isAdmin");
-    throw redirect(isAdmin ? "/admin" : "/news");
+  // Already logged in as super admin → go to admin
+  if (session.get("memberId") && session.get("isSuperAdmin")) {
+    throw redirect("/admin");
   }
-
-  // Block login page: redirect to maintenance (super admin uses /auth/super-login)
-  const ks = await getKillSwitch(DB);
-  if (ks.blockLogin) {
-    throw redirect("/maintenance");
+  // Already logged in but not SA → kick out to normal area
+  if (session.get("memberId")) {
+    throw redirect("/dashboard");
   }
 
   return null;
@@ -43,10 +47,11 @@ export async function action({ request, context }: ActionFunctionArgs) {
     request.headers.get("CF-Connecting-IP") ??
     request.headers.get("X-Forwarded-For") ??
     "unknown";
-  const rl = await checkRateLimit(DB, `login:ip:${ip}`, 10, 60);
+  // Stricter rate limit for this endpoint — 5 attempts per minute
+  const rl = await checkRateLimit(DB, `super-login:ip:${ip}`, 5, 60);
   if (!rl.allowed) {
     return json(
-      { error: "Too many login attempts. Please wait a minute and try again." },
+      { error: "Too many attempts. Please wait." },
       { status: 429 }
     );
   }
@@ -55,52 +60,48 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const memberId = (form.get("memberId") as string | null)?.trim().toUpperCase();
   const pin = form.get("pin") as string | null;
 
-  if (!memberId) {
-    return json({ error: "Member ID is required." }, { status: 400 });
+  if (!memberId || !pin) {
+    return json({ error: "Member ID and PIN are required." }, { status: 400 });
   }
 
   const member = await getMemberById(DB, memberId);
 
-  if (!member || !member.is_active) {
-    return json({ error: "Invalid Member ID or PIN." }, { status: 401 });
+  // Only super admins allowed — use same generic error to avoid enumeration
+  if (!member || !member.is_active || member.is_super_admin !== 1) {
+    return json({ error: "Access denied." }, { status: 403 });
   }
 
-  if (!member.pin_set) {
-    throw redirect(`/auth/setup-pin?id=${encodeURIComponent(memberId)}`);
+  if (!member.pin_hash || !member.pin_salt) {
+    return json({ error: "PIN not configured for this account." }, { status: 403 });
   }
 
-  if (!pin) {
-    return json({ error: "PIN is required." }, { status: 400 });
-  }
-
-  const ok = await verifyPin(pin, member.pin_hash!, member.pin_salt!);
+  const ok = await verifyPin(pin, member.pin_hash, member.pin_salt);
   if (!ok) {
-    return json({ error: "Invalid Member ID or PIN." }, { status: 401 });
+    return json({ error: "Access denied." }, { status: 403 });
   }
 
   const cookieHeader = await commitSession(request, SESSION_SECRET, {
     memberId: member.id,
-    isAdmin: member.is_admin === 1 || member.is_super_admin === 1,
-    isSuperAdmin: member.is_super_admin === 1,
+    isAdmin: true,
+    isSuperAdmin: true,
     memberName: member.name,
   });
-
-  const isAnyAdmin = member.is_admin === 1 || member.is_super_admin === 1;
 
   await logAudit(DB, {
     actorId: member.id,
     actorName: member.name,
-    actorRole: member.is_super_admin === 1 ? "super_admin" : member.is_admin === 1 ? "admin" : "member",
+    actorRole: "super_admin",
     action: "login",
+    details: { via: "super-login" },
     ip: getClientIp(request),
   });
 
-  throw redirect(isAnyAdmin ? "/admin" : "/news", {
+  throw redirect("/admin", {
     headers: { "Set-Cookie": cookieHeader },
   });
 }
 
-export default function LoginPage() {
+export default function SuperLoginPage() {
   const actionData = useActionData<typeof action>();
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
@@ -109,20 +110,24 @@ export default function LoginPage() {
     <div className="auth-page">
       <div className="auth-card">
         <div className="auth-logo">
-          <div className="auth-logo-mark">🙏</div>
-          <div className="auth-logo-title">Sevadal Attendance</div>
-          <div className="auth-logo-sub">Sant Nirankari Mission</div>
+          <div className="auth-logo-mark">🔐</div>
+          <div className="auth-logo-title">Admin Access</div>
+          <div className="auth-logo-sub" style={{ color: "var(--error)", fontWeight: 600, fontSize: "12px" }}>
+            Super Admin Only
+          </div>
         </div>
 
         <Form method="post" style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
           <div className="form-group">
-            <label className="form-label" htmlFor="memberId">Member ID</label>
+            <label className="form-label" htmlFor="memberId">
+              Member ID
+            </label>
             <input
               id="memberId"
               name="memberId"
               type="text"
               className={`form-input${actionData?.error ? " error" : ""}`}
-              placeholder="e.g. SNM-001 or 1001"
+              placeholder="Super Admin Member ID"
               autoCapitalize="characters"
               autoComplete="username"
               autoFocus
@@ -132,18 +137,20 @@ export default function LoginPage() {
           </div>
 
           <div className="form-group">
-            <label className="form-label" htmlFor="pin">4-Digit PIN</label>
+            <label className="form-label" htmlFor="pin">
+              PIN
+            </label>
             <input
               id="pin"
               name="pin"
               type="password"
               className={`form-input${actionData?.error ? " error" : ""}`}
-              placeholder="Enter your PIN (or leave empty for first login)"
+              placeholder="4-digit PIN"
               inputMode="numeric"
               maxLength={4}
               autoComplete="current-password"
+              required
             />
-            <span className="form-hint">First time? Leave PIN empty and click Login.</span>
           </div>
 
           {actionData?.error && (
@@ -153,21 +160,31 @@ export default function LoginPage() {
             </div>
           )}
 
-          <button type="submit" className="btn btn-primary btn-lg btn-full" disabled={submitting}>
+          <button
+            type="submit"
+            className="btn btn-primary btn-lg btn-full"
+            disabled={submitting}
+          >
             {submitting ? (
-              <><span className="spinner" style={{ borderTopColor: "white" }} />Verifying…</>
-            ) : "Login"}
+              <>
+                <span className="spinner" style={{ borderTopColor: "white" }} />
+                Verifying…
+              </>
+            ) : (
+              "Access Admin Panel"
+            )}
           </button>
         </Form>
 
-        <div style={{ marginTop: "16px" }}>
-          <Link to="/news" className="btn btn-secondary btn-lg btn-full">
-            View News & Notices →
-          </Link>
-        </div>
-
-        <p style={{ textAlign: "center", fontSize: "12px", color: "var(--gray-400)", marginTop: "20px" }}>
-          Don't have a PIN yet? Use your Member ID to set one on first login.
+        <p
+          style={{
+            textAlign: "center",
+            fontSize: "11px",
+            color: "var(--gray-400)",
+            marginTop: "20px",
+          }}
+        >
+          This page is for Super Admins only. Unauthorized access attempts are logged.
         </p>
       </div>
     </div>

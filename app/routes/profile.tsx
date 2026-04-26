@@ -4,6 +4,7 @@ import { useState } from "react";
 import { requireMember } from "~/lib/session.server";
 import { getMemberById, setMemberPin, updateMember } from "~/lib/db.server";
 import { generateSalt, hashPin, isWeakPin, verifyPin } from "~/lib/auth.server";
+import { getKillSwitch } from "~/lib/killswitch.server";
 import { uploadProfilePhoto } from "~/lib/r2.server";
 
 export const meta: MetaFunction = () => [{ title: "Profile — Sevadal Attendance" }];
@@ -11,6 +12,14 @@ export const meta: MetaFunction = () => [{ title: "Profile — Sevadal Attendanc
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const { DB, SESSION_SECRET } = context.cloudflare.env;
   const session = await requireMember(request, SESSION_SECRET, DB);
+
+  // Kill switch: block members from profile page if member block is on
+  if (!session.isSuperAdmin) {
+    const ks = await getKillSwitch(DB);
+    if (!session.isAdmin && ks.blockMembers) throw redirect("/maintenance");
+    if (session.isAdmin  && ks.blockAdmins)  throw redirect("/maintenance");
+  }
+
   const member = await getMemberById(DB, session.memberId);
   if (!member) throw redirect("/auth/logout");
   return json({ member });
@@ -75,6 +84,25 @@ export default function ProfilePage() {
   const submitting = nav.state==="submitting";
   const [editing, setEditing] = useState(false);
 
+  if (nav.state === "loading") {
+    return (
+      <div className="member-shell">
+        <header className="member-header">
+          <div className="member-header__logo"><span className="member-header__title">My Profile</span></div>
+        </header>
+        <main className="member-content">
+          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", padding:"32px 16px", gap:14, background:"linear-gradient(160deg,#fff3e0 0%,white 60%)", borderBottom:"1px solid var(--gray-100)" }}>
+            <div className="skeleton" style={{ width:88, height:88, borderRadius:"50%" }}/>
+            <div className="skeleton skeleton-title" style={{ width:160 }}/>
+            <div className="skeleton skeleton-text" style={{ width:80 }}/>
+          </div>
+          <div className="skeleton-section">
+            {[0,1,2,3].map(i=><div key={i} style={{display:"flex",flexDirection:"column",gap:6}}><div className="skeleton skeleton-text" style={{width:"30%"}}/><div className="skeleton" style={{height:44}}/></div>)}
+          </div>
+        </main>
+      </div>
+    );
+  }
   return (
     <div className="member-shell">
       <header className="member-header">

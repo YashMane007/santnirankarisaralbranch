@@ -63,6 +63,19 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     });
   }
 
+  // Check backup time — only fire within ±20 minutes of configured IST time.
+  // This allows cron to run every 30 min while still honouring user-set time.
+  const nowIST = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }).replace(".", ":");
+  const cfgTime = settings.telegram_backup_time || "00:06";
+  const toMin = (t: string) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+  const diff = Math.abs(toMin(nowIST) - toMin(cfgTime));
+  const skip = url.searchParams.get("force") !== "1";
+  if (skip && diff > 20) {
+    return new Response(JSON.stringify({ ok: false, reason: `Not backup time yet (now ${nowIST} IST, configured ${cfgTime} IST)` }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   const records = await getAttendanceForExport(DB, date, date);
   const stats   = await getDailyStats(DB, date);
 
