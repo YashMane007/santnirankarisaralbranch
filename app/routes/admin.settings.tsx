@@ -131,6 +131,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
     await DB.prepare("DELETE FROM audit_log").run();
     await DB.prepare("DELETE FROM announcements").run();
     await DB.prepare("DELETE FROM rate_limits").run();
+    await DB.prepare("DELETE FROM members").run();
+    await DB.prepare("DELETE FROM admin_permissions").run();
+    await DB.prepare("DELETE FROM locations_schedules").run();
+    await DB.prepare("DELETE FROM sqlite_sequence").run();
     await logAudit(DB, { actorId: session.memberId, actorName: session.memberName, actorRole: "super_admin", action: "database_wiped", ip: getClientIp(request) });
     return json({ success: "Database wiped. Members, locations and settings preserved." });
   }

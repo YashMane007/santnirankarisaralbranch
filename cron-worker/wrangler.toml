@@ -12,7 +12,7 @@ crons = ["*/30 * * * *"]
 # ─── Variables ────────────────────────────────────────────────────────────────
 [vars]
 # Replace with your actual live domain after deploying to Cloudflare Pages
-APP_URL = "https://sevadal-attendance.pages.dev"
+APP_URL = "https://santnirankarisaralbranch.pages.dev"
 
 # ─── Secrets (set via: wrangler secret put BACKUP_SECRET) ────────────────────
 # BACKUP_SECRET — must match the BACKUP_SECRET env var in your main app
