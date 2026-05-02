@@ -1,7 +1,7 @@
 {
-  "name": "Sevadal Attendance",
-  "short_name": "Sevadal",
-  "description": "Sant Nirankari Mission — Sevadal Attendance System",
+  "name": "Sant Nirankari Saral Branch",
+  "short_name": "SNSB",
+  "description": "Sant Nirankari Mission - Saral Branch Attendance Management System",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",
