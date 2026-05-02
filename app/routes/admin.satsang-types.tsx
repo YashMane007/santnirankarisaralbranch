@@ -2,6 +2,7 @@ import { type ActionFunctionArgs, type LoaderFunctionArgs, type MetaFunction, js
 import { Form, useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { requireSuperAdmin } from "~/lib/session.server";
 import { listSatsangTypes, createSatsangType, updateSatsangType, deleteSatsangType } from "~/lib/db.server";
+import { Toast } from "~/components/Toast";
 import { useConfirm } from "~/components/ConfirmModal";
 
 export const meta: MetaFunction = () => [{ title: "Satsang Types — Sevadal Admin" }];
@@ -106,6 +107,8 @@ export default function SatsangTypesPage() {
         </div>
       </div>
       {ConfirmDialog}
+      <Toast message={(ad as any)?.error} type="error" />
+      <Toast message={(ad as any)?.success} type="success" />
     </>
   );
 }

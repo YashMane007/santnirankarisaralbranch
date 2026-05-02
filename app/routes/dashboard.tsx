@@ -1,3 +1,4 @@
+import { Toast } from "~/components/Toast";
 import { type ActionFunctionArgs, type LoaderFunctionArgs, type MetaFunction, json, redirect } from "@remix-run/cloudflare";
 import { Form, Link, useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { useCallback, useEffect, useState } from "react";
@@ -83,7 +84,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     if (locIds.length>0) checkLocations = allLocations.filter(l=>locIds.includes(l.id));
   }
   const geo=checkGeofence(lat,lng,checkLocations);
-  if (!geo) return json({error:"No active locations found."},{status:400});
+  if (!geo) return json({error:"No satsang location is active for your area. If you think this is a mistake, please contact your admin."},{status:400});
   if (!geo.allowed) return json({error:`You are ${geo.distanceMeters}m from ${geo.locationName}. Must be within ${geo.radiusMeters}m.`},{status:403});
   const member=await getMemberById(DB,session.memberId);
   if (!member) throw redirect("/auth/logout");
@@ -164,14 +165,15 @@ export default function DashboardPage() {
   const greeting=new Date().getHours()<12?"Good morning":new Date().getHours()<17?"Good afternoon":"Good evening";
 
   return (
-    <div className="member-shell">
-      <header className="member-header">
-        <div className="member-header__logo">
-          <div className="member-header__logo-mark">🙏</div>
-          <span className="member-header__title">Sevadal</span>
-        </div>
-        {member.photo_key?<img src={`/api/photo/${encodeURIComponent(member.photo_key)}`} alt={member.name} className="avatar avatar-sm" style={{objectFit:"cover"}}/>:<div className="avatar avatar-sm">{member.name[0]}</div>}
-      </header>
+    <>
+      <div className="member-shell">
+        <header className="member-header">
+          <div className="member-header__logo">
+            <div className="member-header__logo-mark">🙏</div>
+            <span className="member-header__title">Sevadal</span>
+          </div>
+          {member.photo_key?<img src={`/api/photo/${encodeURIComponent(member.photo_key)}`} alt={member.name} className="avatar avatar-sm" style={{objectFit:"cover"}}/>:<div className="avatar avatar-sm">{member.name[0]}</div>}
+        </header>
 
       <main className="member-content">
         {appSettings?.announcement_banner && (
@@ -340,5 +342,8 @@ export default function DashboardPage() {
         </Link>
       </nav>
     </div>
+    <Toast message={actionData?.error} type="error" />
+    <Toast message={actionData?.success?"✅ Attendance marked!":undefined} type="success" />
+    </>
   );
 }

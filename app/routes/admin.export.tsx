@@ -10,7 +10,9 @@ function todayIST()    { return new Date().toLocaleDateString("en-CA",{timeZone:
 function firstOfMonth(){ const d=new Date(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata"})); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-01`; }
 
 const COLUMN_DEFS = [
+  { key:"sr_no",        label:"Sr. No."       },
   { key:"date",         label:"Date"          },
+  { key:"day",          label:"Day"           },   // NEW — Fri, 1 May(5), 2026
   { key:"id",           label:"Member ID"     },
   { key:"name",         label:"Name"          },
   { key:"seva_role",    label:"Seva Role"     },
@@ -45,20 +47,22 @@ export default function AdminExportPage() {
   const [showColPicker, setShowColPicker] = useState(false);
   const today = todayIST();
 
-  if (!hasExportPerm) return (
-    <>
-      <div className="admin-topbar"><h1 className="admin-topbar__title">📥 Export CSV / PDF</h1></div>
-      <div className="admin-content"><div className="alert alert-error">You do not have permission to export data.</div></div>
-    </>
-  );
-
-  // Load remembered column choices
+  // IMPORTANT: useEffect must be BEFORE any conditional return — hooks must
+  // be called unconditionally. Moving it here fixes the "something went wrong"
+  // crash when hasExportPerm flips while the admin is on this page.
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) setSelectedCols(new Set(JSON.parse(saved)));
     } catch {}
   }, []);
+
+  if (!hasExportPerm) return (
+    <>
+      <div className="admin-topbar"><h1 className="admin-topbar__title">📥 Export CSV / PDF</h1></div>
+      <div className="admin-content"><div className="alert alert-error">You do not have permission to export data.</div></div>
+    </>
+  );
 
   const saveAndClose = () => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(selectedCols))); } catch {}
@@ -127,7 +131,7 @@ export default function AdminExportPage() {
               <div style={{ fontSize:"11px", color:"var(--gray-400)", marginTop:"6px" }}>Your column choice is remembered in this browser.</div>
             </div>
 
-            {/* Download button — plain <a> so browser handles the file natively */}
+            {/* Download button */}
             <a
               href={selectedCols.size > 0 ? downloadUrl : "#"}
               className={`btn btn-primary btn-lg btn-full${selectedCols.size === 0 ? " btn-disabled" : ""}`}
@@ -162,7 +166,7 @@ export default function AdminExportPage() {
               ))}
             </div>
             <div style={{ marginTop:"12px", fontSize:"12px", color:"var(--gray-400)" }}>
-              CSV opens in Excel and Google Sheets with UTF-8 BOM. PDF is A4 formatted report. Times are IST.
+              CSV opens in Excel and Google Sheets with UTF-8 BOM. PDF is A4 formatted report. Times are IST. Day column format: Fri, 1 May(5), 2026.
             </div>
           </div>
         </div>

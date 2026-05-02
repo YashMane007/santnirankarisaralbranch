@@ -2,21 +2,36 @@ import { type ActionFunctionArgs, type LoaderFunctionArgs, type MetaFunction, js
 import { Form, useActionData, useLoaderData, useNavigation, useSearchParams } from "@remix-run/react";
 import { useState } from "react";
 import { useConfirm } from "~/components/ConfirmModal";
+import { Toast } from "~/components/Toast";
 import { useAdminLayout } from "~/routes/admin";
 import { createMember, listMembers, memberIdExists, resetMemberPin, updateMember, deleteMember, bulkCreateMembers } from "~/lib/db.server";
+import { requireAdmin } from "~/lib/session.server";
 import { getAdminPermissions, can } from "~/lib/permissions.server";
 import { logAudit, getClientIp } from "~/lib/audit.server";
 
 export const meta: MetaFunction = () => [{ title: "Members — Sevadal Admin" }];
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
-  const { DB } = context.cloudflare.env;
+  const { DB, SESSION_SECRET } = context.cloudflare.env;
+  const session = await requireAdmin(request, SESSION_SECRET, DB);
+  const perms = await getAdminPermissions(DB, session.memberId, session.isSuperAdmin);
   const url = new URL(request.url);
   const search   = url.searchParams.get("q")       ?? "";
   const sortBy   = url.searchParams.get("sortBy")  ?? "name";
   const sortDir  = (url.searchParams.get("sortDir") ?? "asc") as "asc"|"desc";
-  const members  = await listMembers(DB, { search, sortBy, sortDir });
-  return json({ members, search, sortBy, sortDir });
+  // Non-SA admin cannot see SA members
+  const members  = await listMembers(DB, { search, sortBy, sortDir, excludeSuperAdmins: !session.isSuperAdmin });
+  return json({
+    members,
+    search, sortBy, sortDir,
+    canViewMembers:    can(perms,"view_members")         || session.isSuperAdmin,
+    canAddMembers:     can(perms,"add_members")          || session.isSuperAdmin,
+    canEditMembers:    can(perms,"edit_members")         || session.isSuperAdmin,
+    canDeleteMembers:  can(perms,"delete_members")       || session.isSuperAdmin,
+    canToggleActive:   can(perms,"toggle_member_active") || session.isSuperAdmin,
+    canPromoteAdmin:   can(perms,"promote_admin")        || session.isSuperAdmin,
+    isSuperAdmin: session.isSuperAdmin,
+  });
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
@@ -75,7 +90,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     return json({ actionSuccess:"Member updated." });
   }
   if (intent==="delete") {
-    if (!session.isSuperAdmin) return json({ actionError:"Only super admins can delete." });
+    if (!can(perms,"delete_members") && !session.isSuperAdmin) return json({ actionError:"You do not have permission to delete members." });
     const memberId=form.get("memberId") as string;
     if (memberId===session.memberId) return json({ actionError:"Cannot delete yourself." });
     await deleteMember(DB,memberId);
@@ -83,7 +98,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     return json({ actionSuccess:"Member deleted." });
   }
   if (intent==="toggle-active") {
-    if (!can(perms,"edit_members")) return json({ actionError:"You do not have permission to activate/deactivate members." });
+    if (!can(perms,"toggle_member_active") && !session.isSuperAdmin) return json({ actionError:"You do not have permission to activate/deactivate members." });
     const memberId=form.get("memberId") as string;
     const cur=form.get("currentActive")==="1";
     if (memberId===session.memberId) return json({ actionError:"Cannot deactivate yourself." });
@@ -98,14 +113,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
     return json({ actionSuccess:"PIN reset. Member sets new PIN on next login." });
   }
   if (intent==="toggle-admin") {
-    if (!session.isSuperAdmin) return json({ actionError:"Only super admins can change admin status." });
-    if (!can(perms,"promote_admin")) return json({ actionError:"You do not have permission to promote/demote admins." });
+    if (!can(perms,"promote_admin") && !session.isSuperAdmin) return json({ actionError:"You do not have permission to promote/demote admins." });
     const memberId=form.get("memberId") as string;
     const cur=form.get("currentAdmin")==="1";
-    if (memberId===session.memberId) return json({ actionError:"Cannot change your own status." });
+    if (memberId===session.memberId) return json({ actionError:"Cannot change your own admin status." });
     await updateMember(DB,memberId,{is_admin:cur?0:1});
-    await logAudit(DB,{ actorId:session.memberId, actorName:session.memberName, actorRole:"super_admin", action:cur?"admin_removed":"admin_granted", targetType:"member", targetId:memberId, ip });
-    return json({ actionSuccess:`Admin ${cur?"removed":"granted"}.` });
+    await logAudit(DB,{ actorId:session.memberId, actorName:session.memberName, actorRole:session.isSuperAdmin?"super_admin":"admin", action:cur?"admin_demoted":"admin_promoted", targetType:"member", targetId:memberId, ip });
+    return json({ actionSuccess:`Admin status ${cur?"removed":"granted"}.` });
   }
   if (intent==="toggle-super-admin") {
     if (!session.isSuperAdmin) return json({ actionError:"Only super admins can do this." });
@@ -125,7 +139,7 @@ function SortTh({col,label,sortBy,sortDir,onSort}:{col:string;label:string;sortB
 }
 
 export default function AdminMembersPage() {
-  const { members, search, sortBy, sortDir } = useLoaderData<typeof loader>();
+  const { members, search, sortBy, sortDir, canViewMembers, canAddMembers, canEditMembers, canDeleteMembers, canToggleActive, canPromoteAdmin, isSuperAdmin: loaderIsSA } = useLoaderData<typeof loader>();
   const { isSuperAdmin } = useAdminLayout();
   const actionData = useActionData<typeof action>();
   const nav = useNavigation();
@@ -156,10 +170,11 @@ export default function AdminMembersPage() {
   return (
     <>
       <div className="admin-topbar">
-        <h1 className="admin-topbar__title">Members ({filtered.length}/{members.length})</h1>
+        {canViewMembers ? ( <div><h1 className="admin-topbar__title">Members ({filtered.length}/{members.length})</h1></div> )
+        : ( <div><h1 className="admin-topbar__title">Members</h1></div> )}
         <div style={{display:"flex",gap:"8px"}}>
-          <button className="btn btn-secondary btn-md" type="button" onClick={()=>setShowBulk(true)} title="Import multiple members from a CSV file">📤 Bulk Import</button>
-          <button className="btn btn-primary btn-md"   type="button" onClick={()=>setShowCreate(true)} title="Add a single new member">+ Add Member</button>
+          {canAddMembers&&<button className="btn btn-secondary btn-md" type="button" onClick={()=>setShowBulk(true)} title="Import multiple members from a CSV file">📤 Bulk Import</button>}
+          {canAddMembers&&<button className="btn btn-primary btn-md"   type="button" onClick={()=>setShowCreate(true)} title="Add a single new member">+ Add Member</button>}
         </div>
       </div>
 
@@ -175,6 +190,10 @@ export default function AdminMembersPage() {
           </div>
         )}
 
+        {!canViewMembers ? (
+          <div className="alert alert-error">⚠️ You do not have permission to view members.</div>
+        ) : (
+        <>
         <div className="toolbar">
           <Form method="get" style={{flex:1,maxWidth:"280px"}}>
             <div className="search-bar">
@@ -183,7 +202,10 @@ export default function AdminMembersPage() {
             </div>
           </Form>
           <select className="form-select" style={{width:"auto"}} value={filterRole} onChange={e=>setFilterRole(e.target.value)} title="Filter by role">
-            <option value="all">All Roles</option><option value="super">Super Admin</option><option value="admin">Admin</option><option value="member">Member Only</option>
+            <option value="all">All Roles</option>
+            {isSuperAdmin&&<option value="super">Super Admin</option>}
+            <option value="admin">Admin</option>
+            <option value="member">Member Only</option>
           </select>
           {zones.length>0&&<select className="form-select" style={{width:"auto"}} value={filterZone} onChange={e=>setFilterZone(e.target.value)} title="Filter by zone"><option value="">All Zones</option>{zones.map(z=><option key={z!} value={z!}>{z}</option>)}</select>}
         </div>
@@ -210,12 +232,12 @@ export default function AdminMembersPage() {
                     <td><span className={`badge ${m.pin_set?"badge-success":"badge-gray"}`}>{m.pin_set?"Set":"Not Set"}</span></td>
                     <td>
                       <div style={{display:"flex",gap:"4px",flexWrap:"wrap"}}>
-                        <button type="button" className="btn btn-sm btn-secondary" onClick={()=>setEditMember(m)} title="Edit member details">✏️</button>
-                        <Form method="post"><input type="hidden" name="intent" value="toggle-active"/><input type="hidden" name="memberId" value={m.id}/><input type="hidden" name="currentActive" value={m.is_active?"1":"0"}/><button type="submit" className={`btn btn-sm ${m.is_active?"btn-danger":"btn-secondary"}`} title={m.is_active?"Deactivate — member cannot login":"Activate member"}>{m.is_active?"Deactivate":"Activate"}</button></Form>
-                        <Form method="post" onSubmit={async (e)=>{ e.preventDefault(); if (await confirm(`Reset PIN for ${m.name}? They will set a new PIN on next login.`, {danger:true})) (e.target as HTMLFormElement).submit(); }}><input type="hidden" name="intent" value="reset-pin"/><input type="hidden" name="memberId" value={m.id}/><button type="submit" className="btn btn-sm btn-secondary" title="Reset PIN — member sets new PIN on next login">Reset PIN</button></Form>
-                        {isSuperAdmin&&!m.is_super_admin&&<Form method="post" onSubmit={async (e)=>{ e.preventDefault(); if (await confirm(m.is_admin?`Remove admin from ${m.name}?`:`Make ${m.name} admin?`, {danger:true})) (e.target as HTMLFormElement).submit(); }}><input type="hidden" name="intent" value="toggle-admin"/><input type="hidden" name="memberId" value={m.id}/><input type="hidden" name="currentAdmin" value={m.is_admin?"1":"0"}/><button type="submit" className="btn btn-sm btn-secondary" title={m.is_admin?"Remove admin privileges":"Grant admin privileges"}>{m.is_admin?"−Admin":"+Admin"}</button></Form>}
-                        {isSuperAdmin&&<Form method="post" onSubmit={async (e)=>{ e.preventDefault(); if (await confirm(m.is_super_admin?`Remove Super Admin from ${m.name}?`:`Make ${m.name} SUPER ADMIN?`, {danger:true})) (e.target as HTMLFormElement).submit(); }}><input type="hidden" name="intent" value="toggle-super-admin"/><input type="hidden" name="memberId" value={m.id}/><input type="hidden" name="currentSA" value={m.is_super_admin?"1":"0"}/><button type="submit" className={`btn btn-sm ${m.is_super_admin?"btn-danger":"btn-secondary"}`} title={m.is_super_admin?"Remove super admin (cannot edit past data)":"Grant super admin (can edit past data)"}>{m.is_super_admin?"−SA":"+SA"}</button></Form>}
-                        {isSuperAdmin&&<Form method="post" onSubmit={async (e)=>{ e.preventDefault(); if (await confirm(`PERMANENTLY DELETE ${m.name}? This cannot be undone.`, {danger:true, title:"Delete Member", confirmLabel:"Delete"})) (e.target as HTMLFormElement).submit(); }}><input type="hidden" name="intent" value="delete"/><input type="hidden" name="memberId" value={m.id}/><button type="submit" className="btn btn-sm btn-danger" title="Permanently delete member and all their records">🗑</button></Form>}
+                        {canEditMembers&&<button type="button" className="btn btn-sm btn-secondary" onClick={()=>setEditMember(m)} title="Edit member details">✏️</button>}
+                        {canToggleActive&&<Form method="post" onSubmit={async(e)=>{e.preventDefault();if(await confirm(m.is_active?`Deactivate ${m.name}? They cannot login until reactivated.`:`Activate ${m.name}?`,{danger:m.is_active,title:m.is_active?"Deactivate Member":"Activate Member",confirmLabel:m.is_active?"Deactivate":"Activate"}))(e.target as HTMLFormElement).submit();}}><input type="hidden" name="intent" value="toggle-active"/><input type="hidden" name="memberId" value={m.id}/><input type="hidden" name="currentActive" value={m.is_active?"1":"0"}/><button type="submit" className={`btn btn-sm ${m.is_active?"btn-danger":"btn-secondary"}`} title={m.is_active?"Deactivate — member cannot login":"Activate member"}>{m.is_active?"Deactivate":"Activate"}</button></Form>}
+                        {canEditMembers&&<Form method="post" onSubmit={async (e)=>{ e.preventDefault(); if (await confirm(`Reset PIN for ${m.name}? They will set a new PIN on next login.`, {danger:true})) (e.target as HTMLFormElement).submit(); }}><input type="hidden" name="intent" value="reset-pin"/><input type="hidden" name="memberId" value={m.id}/><button type="submit" className="btn btn-sm btn-secondary" title="Reset PIN — member sets new PIN on next login">Reset PIN</button></Form>}
+                        {canPromoteAdmin&&!m.is_super_admin&&<Form method="post" onSubmit={async (e)=>{ e.preventDefault(); if (await confirm(m.is_admin?`Remove admin from ${m.name}?`:`Make ${m.name} admin?`, {danger:true})) (e.target as HTMLFormElement).submit(); }}><input type="hidden" name="intent" value="toggle-admin"/><input type="hidden" name="memberId" value={m.id}/><input type="hidden" name="currentAdmin" value={m.is_admin?"1":"0"}/><button type="submit" className="btn btn-sm btn-secondary" title={m.is_admin?"Remove admin privileges":"Grant admin privileges"}>{m.is_admin?"−Admin":"+Admin"}</button></Form>}
+                        {isSuperAdmin&&<Form method="post" onSubmit={async (e)=>{ e.preventDefault(); if (await confirm(m.is_super_admin?`Remove Super Admin from ${m.name}?`:`Make ${m.name} SUPER ADMIN?`, {danger:true})) (e.target as HTMLFormElement).submit(); }}><input type="hidden" name="intent" value="toggle-super-admin"/><input type="hidden" name="memberId" value={m.id}/><input type="hidden" name="currentSA" value={m.is_super_admin?"1":"0"}/><button type="submit" className={`btn btn-sm ${m.is_super_admin?"btn-danger":"btn-secondary"}`} title={m.is_super_admin?"Remove super admin":"Grant super admin"}>{m.is_super_admin?"−SA":"+SA"}</button></Form>}
+                        {canDeleteMembers&&<Form method="post" onSubmit={async (e)=>{ e.preventDefault(); if (await confirm(`PERMANENTLY DELETE ${m.name}? This cannot be undone.`, {danger:true, title:"Delete Member", confirmLabel:"Delete"})) (e.target as HTMLFormElement).submit(); }}><input type="hidden" name="intent" value="delete"/><input type="hidden" name="memberId" value={m.id}/><button type="submit" className="btn btn-sm btn-danger" title="Permanently delete member and all their records">🗑</button></Form>}
                       </div>
                     </td>
                   </tr>
@@ -224,6 +246,8 @@ export default function AdminMembersPage() {
             </table>
           </div>
         </div>
+        </>
+        )}
       </div>
 
       {/* Edit Modal */}
@@ -284,6 +308,8 @@ export default function AdminMembersPage() {
       )}
 
       {ConfirmDialog}
+      <Toast message={ad?.actionError||ad?.createError} type="error" />
+      <Toast message={ad?.actionSuccess||ad?.createSuccess?"✅ Done":undefined} type="success" />
       {/* Bulk Import Modal */}
       {showBulk&&(
         <div className="modal-backdrop" onClick={e=>{if(e.target===e.currentTarget)setShowBulk(false);}}>

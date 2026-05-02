@@ -8,6 +8,7 @@ import { requireAdmin } from "~/lib/session.server";
 import { listAnnouncements, createAnnouncement, updateAnnouncement, deleteAnnouncement } from "~/lib/db.server";
 import { logAudit, getClientIp } from "~/lib/audit.server";
 import { useConfirm } from "~/components/ConfirmModal";
+import { Toast } from "~/components/Toast";
 import { getAdminPermissions, can } from "~/lib/permissions.server";
 
 export const meta: MetaFunction = () => [{ title: "Announcements — Sevadal Admin" }];
@@ -27,9 +28,18 @@ const AUDIENCE_MAP: Record<string, string> = {
   public: "🌐 Everyone", all: "🌐 Everyone", members: "👥 Members", admins: "🔐 Admins",
 };
 
-export async function loader({ context }: LoaderFunctionArgs) {
-  const { DB } = context.cloudflare.env;
-  return json({ announcements: await listAnnouncements(DB) });
+export async function loader({ request, context }: LoaderFunctionArgs) {
+  const { DB, SESSION_SECRET } = context.cloudflare.env;
+  const session = await (await import("~/lib/session.server")).requireAdmin(request, SESSION_SECRET, DB);
+  const perms = await (await import("~/lib/permissions.server")).getAdminPermissions(DB, session.memberId, session.isSuperAdmin);
+  const { can } = await import("~/lib/permissions.server");
+  return json({
+    announcements: await listAnnouncements(DB),
+    canView:   can(perms,"view_announcements")   || session.isSuperAdmin,
+    canCreate: can(perms,"create_announcements") || session.isSuperAdmin,
+    canEdit:   can(perms,"edit_announcements")   || session.isSuperAdmin,
+    canDelete: can(perms,"delete_announcements") || session.isSuperAdmin,
+  });
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
@@ -37,7 +47,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     const { DB, SESSION_SECRET, BUCKET } = context.cloudflare.env;
     const session = await requireAdmin(request, SESSION_SECRET, DB);
     const perms = await getAdminPermissions(DB, session.memberId, session.isSuperAdmin);
-    if (!can(perms, "manage_announcements")) {
+    if (!can(perms, "view_announcements") && !can(perms, "create_announcements") && !session.isSuperAdmin) {
       return json({ error: "You do not have permission to manage announcements." });
     }
     const ip = getClientIp(request);
@@ -242,7 +252,7 @@ function AudienceCheckboxes({ defaultValue }: { defaultValue?: string | null }) 
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function AdminAnnouncementsPage() {
-  const { announcements } = useLoaderData<typeof loader>();
+  const { announcements, canView, canCreate, canEdit, canDelete } = useLoaderData<typeof loader>();
   const ad = useActionData<typeof action>() as any;
   const nav = useNavigation();
   const submitting = nav.state === "submitting";
@@ -398,9 +408,11 @@ export default function AdminAnnouncementsPage() {
 
       <div className="admin-topbar">
         <h1 className="admin-topbar__title">📢 Announcements</h1>
-        <button className="btn btn-primary btn-md" onClick={() => setShowAdd(true)}>+ New</button>
+        {canCreate&&canView&&<button className="btn btn-primary btn-md" onClick={() => setShowAdd(true)}>+ New</button>}
       </div>
       <div className="admin-content">
+        {!canView && <div className="alert alert-error" style={{marginBottom:"16px"}}>⚠️ You do not have permission to view announcements.</div>}
+        {canView && <>
 
         {/* Audience filter tabs */}
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "14px" }}>
@@ -445,31 +457,29 @@ export default function AdminAnnouncementsPage() {
                   </div>
                   <div style={{ display: "flex", gap: "5px", flexShrink: 0, flexWrap: "wrap" }}>
                     <button type="button" className="btn btn-sm btn-secondary" onClick={() => { setViewAnn({ atts, title: a.title, body: a.body }); setViewImgIdx(0); }} title="Preview">👁️</button>
-                    <button type="button" className="btn btn-sm btn-secondary" onClick={() => setEditAnn(a as any)} title="Edit">✏️</button>
-                    <Form method="post">
+                    {canEdit&&<button type="button" className="btn btn-sm btn-secondary" onClick={() => setEditAnn(a as any)} title="Edit">✏️</button>}
+                    {canEdit&&<Form method="post">
                       <input type="hidden" name="intent" value="pin" /><input type="hidden" name="id" value={a.id} /><input type="hidden" name="pinned" value={a.is_pinned ? "1" : "0"} />
                       <button type="submit" className="btn btn-sm btn-secondary" title={a.is_pinned ? "Unpin" : "Pin"}>{a.is_pinned ? "📍" : "📌"}</button>
-                    </Form>
-                    <Form method="post">
+                    </Form>}
+                    {canEdit&&<Form method="post">
                       <input type="hidden" name="intent" value="toggle" /><input type="hidden" name="id" value={a.id} /><input type="hidden" name="current" value={a.is_active ? "1" : "0"} />
                       <button type="submit" className={`btn btn-sm ${a.is_active ? "btn-secondary" : "btn-outline"}`}>{a.is_active ? "Hide" : "Show"}</button>
-                    </Form>
-                    <Form method="post" onSubmit={async e => { e.preventDefault(); if (await confirm(`Delete "${a.title}"?`, { danger: true, confirmLabel: "Delete", title: "Delete Announcement" })) (e.target as HTMLFormElement).submit(); }}>
+                    </Form>}
+                    {canDelete&&<Form method="post" onSubmit={async e => { e.preventDefault(); if (await confirm(`Delete "${a.title}"?`, { danger: true, confirmLabel: "Delete", title: "Delete Announcement" })) (e.target as HTMLFormElement).submit(); }}>
                       <input type="hidden" name="intent" value="delete" /><input type="hidden" name="id" value={a.id} />
                       <button type="submit" className="btn btn-sm btn-danger">🗑</button>
-                    </Form>
+                    </Form>}
                   </div>
                 </div>
               </div>
             );
           })}
         </div>
+      </>}
       </div>
 
       {ConfirmDialog}
-
-      {/* Toast */}
-      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
 
       {/* Create Modal */}
       {showAdd && (

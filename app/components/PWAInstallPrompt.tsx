@@ -1,18 +1,5 @@
 import { useEffect, useState } from "react";
 
-/**
- * PWA Install Prompt — works on Android AND iOS.
- *
- * WHY the old one was broken:
- *   `beforeinstallprompt` fires during page load, BEFORE React hydrates.
- *   By the time useEffect adds the listener, the event is already gone.
- *   Fix: root.tsx captures it early into window.__pwaPrompt via an inline
- *   <script> in <head>. This component just reads it from there.
- *
- * iOS Safari never fires beforeinstallprompt at all.
- *   Fix: detect iOS and show manual "Share → Add to Home Screen" instructions.
- */
-
 function isIOS() {
   if (typeof navigator === "undefined") return false;
   return /iphone|ipad|ipod/i.test(navigator.userAgent) && !(window as any).MSStream;
@@ -27,7 +14,6 @@ function isAlreadyInstalled() {
 }
 
 const DISMISS_KEY = "pwa-install-dismissed";
-const COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 export default function PWAInstallPrompt() {
   const [mode, setMode] = useState<"android" | "ios" | null>(null);
@@ -36,16 +22,14 @@ export default function PWAInstallPrompt() {
     // Already installed as PWA — never show
     if (isAlreadyInstalled()) return;
 
-    // Cooldown check
+    // Permanently dismissed
     try {
-      const ts = localStorage.getItem(DISMISS_KEY);
-      if (ts && Date.now() - parseInt(ts) < COOLDOWN_MS) return;
+      if (localStorage.getItem(DISMISS_KEY) === "1") return;
     } catch { /* private browsing */ }
 
     if (isIOS()) {
       setMode("ios");
     } else {
-      // Android/Chrome: event was captured early by root.tsx inline script
       if ((window as any).__pwaPrompt) setMode("android");
     }
   }, []);
@@ -58,12 +42,12 @@ export default function PWAInstallPrompt() {
     (window as any).__pwaPrompt = null;
     setMode(null);
     if (outcome === "dismissed") {
-      try { localStorage.setItem(DISMISS_KEY, Date.now().toString()); } catch { /**/ }
+      try { localStorage.setItem(DISMISS_KEY, "1"); } catch { /**/ }
     }
   };
 
   const handleDismiss = () => {
-    try { localStorage.setItem(DISMISS_KEY, Date.now().toString()); } catch { /**/ }
+    try { localStorage.setItem(DISMISS_KEY, "1"); } catch { /**/ }
     setMode(null);
   };
 
@@ -78,7 +62,7 @@ export default function PWAInstallPrompt() {
       }}>
         <span style={{ fontSize: "20px", flexShrink: 0 }}>📲</span>
         <span style={{ flex: 1, fontWeight: 500, color: "var(--saffron-700)", textAlign: "left" }}>
-          Install Sevadal App
+          Install Web App
         </span>
         <button type="button" onClick={handleInstall} style={{
           background: "var(--saffron-600)", color: "white", border: "none",
@@ -114,7 +98,7 @@ export default function PWAInstallPrompt() {
         }}>✕</button>
         <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
           <span style={{ fontSize: "18px" }}>📲</span>
-          <span style={{ fontWeight: 600, color: "var(--saffron-700)" }}>Install Sevadal App</span>
+          <span style={{ fontWeight: 600, color: "var(--saffron-700)" }}>Install Web App</span>
         </div>
         <div style={{ color: "var(--gray-600)", lineHeight: "1.7", fontSize: "12px" }}>
           Tap the <strong>Share</strong> button{" "}
@@ -128,3 +112,4 @@ export default function PWAInstallPrompt() {
 
   return null;
 }
+

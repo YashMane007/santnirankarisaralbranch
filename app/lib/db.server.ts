@@ -38,16 +38,24 @@ export async function getMemberById(db: D1Database, id: string): Promise<Member 
 export async function memberIdExists(db: D1Database, id: string): Promise<boolean> {
   return (await db.prepare("SELECT id FROM members WHERE id = ?").bind(id).first()) !== null;
 }
-export async function listMembers(db: D1Database, opts: { activeOnly?: boolean; search?: string; sortBy?: string; sortDir?: "asc"|"desc" } = {}): Promise<Member[]> {
+export async function listMembers(db: D1Database, opts: { activeOnly?: boolean; search?: string; sortBy?: string; sortDir?: "asc"|"desc"; excludeSuperAdmins?: boolean } = {}): Promise<Member[]> {
   let q = "SELECT * FROM members";
   const b: (string|number)[] = [];
   const c: string[] = [];
   if (opts.activeOnly) c.push("is_active = 1");
+  if (opts.excludeSuperAdmins) c.push("(is_super_admin IS NULL OR is_super_admin = 0)");
   if (opts.search) { c.push("(name LIKE ? OR id LIKE ? OR zone LIKE ?)"); b.push(`%${opts.search}%`,`%${opts.search}%`,`%${opts.search}%`); }
   if (c.length) q += " WHERE " + c.join(" AND ");
   const col = ["name","id","zone","created_at"].includes(opts.sortBy ?? "") ? opts.sortBy : "name";
   q += ` ORDER BY ${col} ${opts.sortDir === "desc" ? "DESC" : "ASC"}`;
   return (await db.prepare(q).bind(...b).all<Member>()).results;
+}
+export async function getMemberByPhone(db: D1Database, phone: string): Promise<Member|null> {
+  return db.prepare("SELECT * FROM members WHERE phone = ? AND is_active = 1 LIMIT 1").bind(phone.trim()).first<Member>();
+}
+export async function phoneExistsForOther(db: D1Database, phone: string, excludeId: string): Promise<boolean> {
+  const r = await db.prepare("SELECT id FROM members WHERE phone = ? AND id != ? LIMIT 1").bind(phone.trim(), excludeId).first<{id:string}>();
+  return !!r;
 }
 export async function createMember(db: D1Database, data: { id:string;name:string;phone?:string;dob?:string;gender?:string;zone?:string;is_admin?:boolean;is_super_admin?:boolean; }): Promise<void> {
   await db.prepare(`INSERT INTO members (id,name,phone,dob,gender,zone,is_admin,is_super_admin,is_active,pin_set,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,1,0,datetime('now'),datetime('now'))`)
@@ -208,8 +216,13 @@ export async function getAbsentList(db: D1Database, date: string, filters:{searc
   return (await db.prepare(`SELECT m.* FROM members m WHERE ${clauses.join(" AND ")} AND m.id NOT IN (SELECT DISTINCT member_id FROM attendance WHERE date=?) ORDER BY m.${sortCol} ${sortDir}`).bind(...b,date).all<Member>()).results;
 }
 
-export async function getAttendanceForExport(db: D1Database, from: string, to: string): Promise<AttendanceRecord[]> {
-  return (await db.prepare("SELECT * FROM attendance WHERE date >= ? AND date <= ? ORDER BY date ASC, member_name ASC").bind(from,to).all<AttendanceRecord>()).results;
+export async function getAttendanceForExport(db: D1Database, from: string, to: string, filters: { search?: string; role?: string; loc?: string } = {}): Promise<AttendanceRecord[]> {
+  const c: string[] = ["date >= ?", "date <= ?"];
+  const b: (string|number)[] = [from, to];
+  if (filters.search) { c.push("(member_name LIKE ? OR member_id LIKE ?)"); b.push(`%${filters.search}%`, `%${filters.search}%`); }
+  if (filters.role)   { c.push("seva_role = ?");      b.push(filters.role); }
+  if (filters.loc)    { c.push("location_name = ?");  b.push(filters.loc); }
+  return (await db.prepare(`SELECT * FROM attendance WHERE ${c.join(" AND ")} ORDER BY date ASC, member_name ASC`).bind(...b).all<AttendanceRecord>()).results;
 }
 
 // ─── Satsang Types ────────────────────────────────────────────────────────────

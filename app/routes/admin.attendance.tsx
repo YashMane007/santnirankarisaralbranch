@@ -1,6 +1,8 @@
 import { type ActionFunctionArgs, type LoaderFunctionArgs, type MetaFunction, json } from "@remix-run/cloudflare";
 import { Form, useActionData, useLoaderData, useSearchParams } from "@remix-run/react";
 import { useState } from "react";
+import { useConfirm } from "~/components/ConfirmModal";
+import { Toast } from "~/components/Toast";
 import { requireAdmin } from "~/lib/session.server";
 import { useAdminLayout } from "~/routes/admin";
 import {
@@ -18,10 +20,12 @@ function fmtDate(iso:string)     { return new Date(iso+"T00:00:00").toLocaleDate
 const PAGE=50;
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
-  const { DB } = context.cloudflare.env;
+  const { DB, SESSION_SECRET } = context.cloudflare.env;
+  const session = await requireAdmin(request, SESSION_SECRET, DB);
+  const perms = await getAdminPermissions(DB, session.memberId, session.isSuperAdmin);
   const url      = new URL(request.url);
   const date     = url.searchParams.get("date")       || todayISO();
-  const toDate   = url.searchParams.get("toDate")     || date;  // date range end
+  const toDate   = url.searchParams.get("toDate")     || date;
   const page     = parseInt(url.searchParams.get("page")||"1");
   const tab      = url.searchParams.get("tab")        || "present";
   const search   = url.searchParams.get("search")     || "";
@@ -37,18 +41,19 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const [presentData, absentList, allMembers, locations, sevaRoles] = await Promise.all([
     getAttendanceLog(DB, date, page, PAGE, { sevaRole:filterRole||undefined, location:filterLoc||undefined, search:search||undefined, sortBy, sortDir, toDate: isRange ? toDate : undefined }),
     getAbsentList(DB, date, { search:search||undefined, sortBy:absSortBy, sortDir:absSortDir }),
-    listMembers(DB,{ activeOnly:true }),
+    listMembers(DB,{ activeOnly:true, excludeSuperAdmins:true }),
     listLocations(DB, true),
     listSevaRoles(DB, true),
   ]);
 
-  // Super admins are NOT counted in attendance — exclude from mark lists
   const members = allMembers.filter(m => !m.is_super_admin);
-
-  // Session filter applied client-side from distinct values
   const allSessions = Array.from(new Set(presentData.records.map(r=>r.session_label).filter(Boolean)));
 
-  return json({ presentRecords:presentData.records, presentTotal:presentData.total, absentList, date, toDate, isRange, page, totalPages:Math.ceil(presentData.total/PAGE), tab, search, filterRole, filterLoc, filterSess, sortBy, sortDir, absSortBy, absSortDir, members, locations, sevaRoles, allSessions });
+  return json({ presentRecords:presentData.records, presentTotal:presentData.total, absentList, date, toDate, isRange, page, totalPages:Math.ceil(presentData.total/PAGE), tab, search, filterRole, filterLoc, filterSess, sortBy, sortDir, absSortBy, absSortDir, members, locations, sevaRoles, allSessions, canViewAttendance:    can(perms,"view_attendance")      ||session.isSuperAdmin,
+    canMarkAttendance:    can(perms,"mark_attendance")      ||session.isSuperAdmin,
+    canBulkMark:          can(perms,"bulk_mark_attendance") ||session.isSuperAdmin,
+    canEditAttendance:    can(perms,"edit_attendance")      ||session.isSuperAdmin,
+    canDeleteAttendance:  can(perms,"delete_attendance")    ||session.isSuperAdmin });
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
@@ -121,12 +126,33 @@ export async function action({ request, context }: ActionFunctionArgs) {
   return json({markError:"Unknown action."});
 }
 
+
+function ExportButton({exportBase, isRange}:{exportBase:URLSearchParams;isRange:boolean}) {
+  const [fmt,setFmt] = useState<"csv"|"pdf">("csv");
+  const href = `/api/export?${exportBase.toString()}&format=${fmt}`;
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:"6px",fontSize:"12px",color:"var(--gray-600)"}}>
+        <label style={{display:"flex",alignItems:"center",gap:"3px",cursor:"pointer"}}>
+          <input type="radio" name="exportFmt" value="csv" checked={fmt==="csv"} onChange={()=>setFmt("csv")} style={{accentColor:"var(--primary)"}}/>
+          Excel
+        </label>
+        <label style={{display:"flex",alignItems:"center",gap:"3px",cursor:"pointer"}}>
+          <input type="radio" name="exportFmt" value="pdf" checked={fmt==="pdf"} onChange={()=>setFmt("pdf")} style={{accentColor:"var(--primary)"}}/>
+          PDF
+        </label>
+      </div>
+      <a href={href} className="btn btn-secondary btn-md">📥 {isRange ? "Export Range" : "Export This Day"}</a>
+    </div>
+  );
+}
+
 function SortTh({col,label,sortBy,sortDir,onSort}:{col:string;label:string;sortBy:string;sortDir:string;onSort:(c:string)=>void}) {
   return <th style={{cursor:"pointer",userSelect:"none",whiteSpace:"nowrap"}} onClick={()=>onSort(col)} title={`Sort by ${label}`}>{label} {sortBy===col?(sortDir==="asc"?"↑":"↓"):<span style={{opacity:.25}}>↕</span>}</th>;
 }
 
 export default function AdminAttendancePage() {
-  const { presentRecords, presentTotal, absentList, date, toDate, isRange, page, totalPages, tab, search, filterRole, filterLoc, filterSess, sortBy, sortDir, absSortBy, absSortDir, members, locations, sevaRoles, allSessions } = useLoaderData<typeof loader>();
+  const { presentRecords, presentTotal, absentList, date, toDate, isRange, page, totalPages, tab, search, filterRole, filterLoc, filterSess, sortBy, sortDir, absSortBy, absSortDir, members, locations, sevaRoles, allSessions, canViewAttendance, canMarkAttendance, canBulkMark, canEditAttendance, canDeleteAttendance } = useLoaderData<typeof loader>();
   const { isSuperAdmin, adminId, adminName } = useAdminLayout();
   const ad = useActionData<typeof action>() as any;
   const [sp,setSp] = useSearchParams();
@@ -137,44 +163,108 @@ export default function AdminAttendancePage() {
   const [bulkRoles,setBulkRoles]   = useState<Record<string,string>>({});
   const [bulkLoc,setBulkLoc]       = useState(locations[0]?.id?.toString()??"");
   const [bulkDate,setBulkDate]     = useState(date);
+  const { confirm, ConfirmDialog } = useConfirm();
   const today = todayISO();
+
+  // Local date state — only committed to URL on Search button click
+  const [localDate, setLocalDate]     = useState(date);
+  const [localToDate, setLocalToDate] = useState(toDate);
 
   const set=(k:string,v:string)=>{const n=new URLSearchParams(sp);n.set(k,v);n.set("page","1");setSp(n);};
   const sortPresent=(col:string)=>{const n=new URLSearchParams(sp);const cur=sp.get("sortBy")||"marked_at";n.set("sortBy",col);n.set("sortDir",cur===col&&(sp.get("sortDir")||"desc")==="asc"?"desc":"asc");setSp(n);};
   const sortAbsent=(col:string)=>{const n=new URLSearchParams(sp);const cur=sp.get("absSortBy")||"name";n.set("absSortBy",col);n.set("absSortDir",cur===col&&(sp.get("absSortDir")||"asc")==="asc"?"desc":"asc");setSp(n);};
 
-  // Client-side session filter on top of server results
-  const displayed = filterSess ? presentRecords.filter(r=>(r.session_label??"")=== filterSess) : presentRecords;
+  // Apply buffered date range to URL params
+  const applyDateRange = () => {
+    const n = new URLSearchParams(sp);
+    n.set("date", localDate);
+    n.set("toDate", localToDate < localDate ? localDate : localToDate);
+    n.set("page", "1");
+    setSp(n);
+  };
+
+  const clearRange = () => {
+    setLocalToDate(localDate);
+    const n = new URLSearchParams(sp);
+    n.set("date", localDate);
+    n.set("toDate", localDate);
+    n.set("page", "1");
+    setSp(n);
+  };
+
+  const displayed = filterSess ? presentRecords.filter(r=>(r.session_label??"")===filterSess) : presentRecords;
+  const exportBase = new URLSearchParams({ from:date, to:toDate });
+  if (search) exportBase.set("search",search);
+  if (filterRole) exportBase.set("role",filterRole);
+  if (filterLoc)  exportBase.set("loc",filterLoc);
+
 
   return (
     <>
       <div className="admin-topbar" style={{flexWrap:"wrap",gap:"8px",minHeight:"auto",padding:"10px 24px"}}>
-        <h1 className="admin-topbar__title">Attendance — {isRange ? `${fmtDate(date)} to ${fmtDate(toDate)}` : fmtDate(date)}</h1>
-        <div style={{display:"flex",gap:"8px",flexWrap:"wrap",alignItems:"center"}}>
+        {canViewAttendance ? ( <div> <h1 className="admin-topbar__title">Attendance  — {isRange ? `${fmtDate(date)} to ${fmtDate(toDate)}` : fmtDate(date)}  </h1> </div> )
+        : ( <h1 className="admin-topbar__title">Attendance </h1> )}
+        {canViewAttendance && ( <div style={{display:"flex",gap:"8px",flexWrap:"wrap",alignItems:"center"}}>
           <div style={{display:"flex",alignItems:"center",gap:"4px"}}>
             <label style={{fontSize:"11px",color:"var(--gray-500)",fontWeight:600}}>From</label>
-            <input type="date" value={date} max={isSuperAdmin?undefined:today} className="form-input" style={{width:"auto"}} onChange={e=>{const n=new URLSearchParams(sp);n.set("date",e.target.value);if(toDate<e.target.value)n.set("toDate",e.target.value);n.set("page","1");setSp(n);}} title="Start date"/>
+            <input
+              type="date"
+              value={localDate}
+              max={isSuperAdmin?undefined:today}
+              className="form-input"
+              style={{width:"auto"}}
+              onChange={e => setLocalDate(e.target.value)}
+              title="Start date"
+            />
             <label style={{fontSize:"11px",color:"var(--gray-500)",fontWeight:600}}>To</label>
-            <input type="date" value={toDate} min={date} max={isSuperAdmin?undefined:today} className="form-input" style={{width:"auto"}} onChange={e=>set("toDate",e.target.value)} title="End date (leave same as From for single day)"/>
-            {isRange && <button type="button" className="btn btn-secondary btn-sm" onClick={()=>{const n=new URLSearchParams(sp);n.set("toDate",date);n.set("page","1");setSp(n);}} title="Clear range">✕</button>}
+            <input
+              type="date"
+              value={localToDate}
+              min={localDate}
+              max={isSuperAdmin?undefined:today}
+              className="form-input"
+              style={{width:"auto"}}
+              onChange={e => setLocalToDate(e.target.value)}
+              title="End date (leave same as From for single day)"
+            />
+            {/* Search button — prevents firing request on every date keystroke */}
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={applyDateRange}
+              title="Load attendance for selected date range"
+            >
+              🔍 Search
+            </button>
+            {isRange && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={clearRange}
+                title="Clear range — revert to single day"
+              >
+                ✕
+              </button>
+            )}
           </div>
-          <button className="btn btn-secondary btn-md" onClick={()=>setShowBulk(true)} title="Mark multiple members present from a list">📋 Mark List</button>
-          <button className="btn btn-primary btn-md"   onClick={()=>setShowMark(true)} title="Mark a single member present">✅ Mark Single</button>
-        </div>
+          {canBulkMark&&<button className="btn btn-secondary btn-md" onClick={()=>setShowBulk(true)} title="Mark multiple members present from a list">📋 Mark List</button>}
+          {canMarkAttendance&&<button className="btn btn-primary btn-md" onClick={()=>setShowMark(true)} title="Mark a single member present">✅ Mark Single</button>}
+        </div> )}
       </div>
 
       <div className="admin-content">
+        {!canViewAttendance && <div className="alert alert-error" style={{marginBottom:"16px"}}>⚠️ You do not have permission to view attendance.</div>}
         {ad?.markSuccess&&<div className="alert alert-success" style={{marginBottom:"16px"}}>✅ {ad.markSuccess}</div>}
         {ad?.markError  &&<div className="alert alert-error"   style={{marginBottom:"16px"}}>⚠️ {ad.markError}</div>}
 
-        {/* Range mode info banner */}
-        {isRange && (
+        {isRange && canViewAttendance &&(
           <div style={{background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:"var(--radius-sm)",padding:"8px 12px",marginBottom:"12px",fontSize:"12px",color:"#c2410c"}}>
             📅 Range: <strong>{fmtDate(date)}</strong> → <strong>{fmtDate(toDate)}</strong> &nbsp;·&nbsp; {presentTotal} records total. Absent tab hidden in range view.
           </div>
         )}
-
+        
         {/* Tabs */}
+        {canViewAttendance && (
         <div style={{display:"flex",borderBottom:"2px solid var(--gray-100)",marginBottom:"20px"}}>
           {[{key:"present",label:`Present (${presentTotal})`},...(!isRange?[{key:"absent",label:`Absent (${absentList.length})`}]:[])].map(t=>(
             <button key={t.key} type="button" onClick={()=>set("tab",t.key)}
@@ -182,10 +272,10 @@ export default function AdminAttendancePage() {
               {t.label}
             </button>
           ))}
-        </div>
+        </div> )}
 
         {/* Filters */}
-        <div className="toolbar" style={{marginBottom:"16px"}}>
+          {canViewAttendance && <div className="toolbar" style={{marginBottom:"16px"}}>
           <input type="text" className="form-input" placeholder="Search name / ID…" style={{maxWidth:"200px"}} defaultValue={search} onChange={e=>set("search",e.target.value)} title="Search by member name or ID"/>
           {tab==="present"&&<>
             <select className="form-select" style={{width:"auto"}} value={filterRole} onChange={e=>set("role",e.target.value)} title="Filter by seva role">
@@ -194,18 +284,16 @@ export default function AdminAttendancePage() {
             <select className="form-select" style={{width:"auto"}} value={filterLoc} onChange={e=>set("loc",e.target.value)} title="Filter by location">
               <option value="">All Locations</option>{locations.map(l=><option key={l.id} value={l.name}>{l.name}</option>)}
             </select>
-            {/* Session filter — NEW */}
             <select className="form-select" style={{width:"auto"}} value={filterSess} onChange={e=>set("sess",e.target.value)} title="Filter by session">
               <option value="">All Sessions</option>
               {allSessions.map(s=><option key={s!} value={s!}>{s}</option>)}
             </select>
           </>}
-          {/* FIX: plain <a> not <Link> — bypasses Remix router, browser handles CSV download natively */}
-          <a href={`/api/export?from=${date}&to=${toDate}`} className="btn btn-secondary btn-md" title={isRange?"Export date range as CSV":"Export this day as CSV"}>📥 {isRange ? "Export Range" : "Export This Day"}</a>
-        </div>
+          <ExportButton exportBase={exportBase} isRange={isRange} />
+        </div>}
 
         {/* Present tab */}
-        {tab==="present"&&(
+        {tab==="present"&& canViewAttendance && (
           <div className="card">
             <div className="table-wrap"><table>
               <thead><tr>
@@ -237,13 +325,13 @@ export default function AdminAttendancePage() {
                     <td style={{fontSize:"12px",color:"var(--gray-500)"}} title={r.marked_by_id?`Admin: ${r.marked_by_name} (${r.marked_by_id})`:"Member marked their own attendance"}>{r.marked_by_id?`${r.marked_by_name} (${r.marked_by_id})`:"Self"}</td>
                     <td>
                       <div style={{display:"flex",gap:"4px"}}>
-                        <button type="button" className="btn btn-sm btn-secondary" onClick={()=>setEditRec(r)} title="Edit seva role for this record">✏️</button>
-                        <Form method="post" onSubmit={e=>{if(!confirm("Delete this attendance record?"))e.preventDefault();}}>
+                        {canEditAttendance&&<button type="button" className="btn btn-sm btn-secondary" onClick={()=>setEditRec(r)} title="Edit seva role for this record">✏️</button>}
+                        {canDeleteAttendance&&<Form method="post" onSubmit={async e=>{e.preventDefault();if(await confirm("Delete this attendance record?",{danger:true,title:"Delete Record",confirmLabel:"Delete"}))(e.target as HTMLFormElement).submit();}}>
                           <input type="hidden" name="intent" value="delete-attendance"/>
                           <input type="hidden" name="attendanceId" value={r.id}/>
                           <input type="hidden" name="date" value={r.date}/>
                           <button type="submit" className="btn btn-sm btn-danger" title="Delete this attendance record permanently">🗑</button>
-                        </Form>
+                        </Form>}
                       </div>
                     </td>
                   </tr>
@@ -259,7 +347,7 @@ export default function AdminAttendancePage() {
         )}
 
         {/* Absent tab */}
-        {tab==="absent"&&(
+        {tab==="absent"&& canViewAttendance && (
           <div className="card"><div className="table-wrap"><table>
             <thead><tr>
               <th>#</th>
@@ -401,6 +489,10 @@ export default function AdminAttendancePage() {
           </div>
         </div>
       )}
+
+      {ConfirmDialog}
+      <Toast message={ad?.markError} type="error" />
+      <Toast message={ad?.markSuccess} type="success" />
     </>
   );
 }

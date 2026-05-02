@@ -6,7 +6,7 @@ import {
   redirect,
 } from "@remix-run/cloudflare";
 import { Form, Link, useActionData, useNavigation } from "@remix-run/react";
-import { getMemberById } from "~/lib/db.server";
+import { getMemberById, getMemberByPhone } from "~/lib/db.server";
 import { verifyPin } from "~/lib/auth.server";
 import { commitSession, getSession } from "~/lib/session.server";
 import { logAudit, getClientIp } from "~/lib/audit.server";
@@ -52,21 +52,25 @@ export async function action({ request, context }: ActionFunctionArgs) {
   }
 
   const form = await request.formData();
-  const memberId = (form.get("memberId") as string | null)?.trim().toUpperCase();
+  const rawInput = (form.get("memberId") as string | null)?.trim() ?? "";
   const pin = form.get("pin") as string | null;
 
-  if (!memberId) {
-    return json({ error: "Member ID is required." }, { status: 400 });
+  if (!rawInput) {
+    return json({ error: "Member ID or phone number is required." }, { status: 400 });
   }
 
-  const member = await getMemberById(DB, memberId);
+  // Detect phone number: purely numeric and 10 digits
+  const isPhone = /^\d{10}$/.test(rawInput);
+  let member = isPhone
+    ? await getMemberByPhone(DB, rawInput)
+    : await getMemberById(DB, rawInput.toUpperCase());
 
   if (!member || !member.is_active) {
     return json({ error: "Invalid Member ID or PIN." }, { status: 401 });
   }
 
   if (!member.pin_set) {
-    throw redirect(`/auth/setup-pin?id=${encodeURIComponent(memberId)}`);
+    throw redirect(`/auth/setup-pin?id=${encodeURIComponent(member.id)}`);
   }
 
   if (!pin) {
@@ -116,13 +120,13 @@ export default function LoginPage() {
 
         <Form method="post" style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
           <div className="form-group">
-            <label className="form-label" htmlFor="memberId">Member ID</label>
+            <label className="form-label" htmlFor="memberId">Member ID or Phone Number</label>
             <input
               id="memberId"
               name="memberId"
               type="text"
               className={`form-input${actionData?.error ? " error" : ""}`}
-              placeholder="e.g. SNM-001 or 1001"
+              placeholder="Member ID or 10-digit phone"
               autoCapitalize="characters"
               autoComplete="username"
               autoFocus
@@ -167,7 +171,7 @@ export default function LoginPage() {
         </div>
 
         <p style={{ textAlign: "center", fontSize: "12px", color: "var(--gray-400)", marginTop: "20px" }}>
-          Don't have a PIN yet? Use your Member ID to set one on first login.
+          Login with your Member ID (e.g. SNSD000) or your 10-digit phone number.
         </p>
       </div>
     </div>

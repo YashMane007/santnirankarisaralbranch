@@ -1415,3 +1415,81 @@ th:hover { background: var(--gray-100); }
   .admin-content { padding: 16px; }
   .admin-topbar { padding: 0 16px; }
 }
+
+/* ─── Toast animation ─────────────────────────────────────────────────────── */
+@keyframes toastSlideIn {
+  from { transform: translateY(20px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* ─── Admin mobile responsive overhaul ───────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Tables: horizontal scroll with sticky first col */
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .table-wrap table { min-width: 600px; }
+
+  /* Admin topbar: stack vertically */
+  .admin-topbar {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 12px 16px;
+    gap: 10px;
+  }
+  .admin-topbar > div { flex-wrap: wrap; }
+
+  /* Sidebar full-width when open */
+  .admin-sidebar--mobile { width: 260px; max-width: 85vw; }
+
+  /* Main content padding reduced */
+  .admin-main { padding-bottom: 20px; }
+  .admin-content { padding: 12px 16px; }
+
+  /* Cards: full width on small screens */
+  .card { border-radius: 10px; }
+
+  /* Toolbar: stack filters */
+  .toolbar { flex-wrap: wrap; gap: 8px; }
+  .toolbar .form-select { width: 100% !important; }
+  .toolbar .form-input { width: 100% !important; }
+
+  /* Action buttons: wrap */
+  .btn-group { flex-wrap: wrap; }
+
+  /* Modals: full-width bottom sheet on mobile */
+  .modal-box { 
+    width: 100% !important; 
+    max-width: 100% !important;
+    border-radius: 16px 16px 0 0 !important;
+  }
+  .modal-backdrop { align-items: flex-end !important; padding: 0 !important; }
+
+  /* Form grids: stack on mobile */
+  .modal-body > div[style*="grid-template-columns"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Members table: hide less important cols */
+  .admin-members-table th:nth-child(3),
+  .admin-members-table td:nth-child(3),
+  .admin-members-table th:nth-child(4),
+  .admin-members-table td:nth-child(4) { display: none; }
+
+  /* Location cards: single column */
+  .locations-grid { grid-template-columns: 1fr !important; }
+
+  /* Hamburger button: larger tap target */
+  .hamburger-btn { 
+    width: 48px; height: 48px; 
+    top: 8px; left: 8px;
+    border-radius: 12px;
+  }
+
+  /* Page title smaller */
+  .admin-topbar__title { font-size: 18px; }
+}
+
+@media (max-width: 480px) {
+  .admin-content { padding: 10px 12px; }
+  /* Action buttons in table: icon only */
+  .btn.btn-sm { padding: 4px 6px; min-width: 32px; }
+}

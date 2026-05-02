@@ -4,6 +4,8 @@
  * Protected by BACKUP_SECRET env var.
  *
  * GET /api/telegram-backup?secret=xxx&date=YYYY-MM-DD
+ *
+ * Rate limit: 5 hits per hour (secondary guard; secret is primary auth).
  */
 import { type LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { getAttendanceForExport, getAbsentList, getDailyStats } from "~/lib/db.server";
@@ -11,6 +13,7 @@ import { getAppSettings, setSetting } from "~/lib/appsettings.server";
 import { generateAttendancePdf, fmtIST, type AttendancePdfOptions } from "~/lib/pdf.server";
 import { sendTelegramFile, sendTelegramMessage, buildBackupSummary, isTodayBackupDay } from "~/lib/telegram.server";
 import { logAudit } from "~/lib/audit.server";
+import { checkRateLimit } from "~/lib/ratelimit.server";
 
 function csvEsc(v: any): string {
   if (v == null) return "";
@@ -33,9 +36,18 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const secret  = url.searchParams.get("secret") ?? "";
   const backupSecret = (env.BACKUP_SECRET as string) ?? "";
 
-  // Auth: require secret token
+  // Primary auth: require secret token
   if (!backupSecret || secret !== backupSecret) {
     return new Response("Unauthorized", { status: 401 });
+  }
+
+  // Rate limit: 5 hits per hour (global — only one legitimate caller)
+  const rl = await checkRateLimit(DB, "telegram-backup:global", 5, 3600);
+  if (!rl.allowed) {
+    return new Response(
+      JSON.stringify({ ok: false, reason: "Rate limit exceeded (5/hour)" }),
+      { status: 429, headers: { "Content-Type": "application/json" } }
+    );
   }
 
   const date = url.searchParams.get("date") ?? yesterdayIST();
@@ -64,7 +76,6 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   }
 
   // Check backup time — only fire within ±20 minutes of configured IST time.
-  // This allows cron to run every 30 min while still honouring user-set time.
   const nowIST = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }).replace(".", ":");
   const cfgTime = settings.telegram_backup_time || "00:06";
   const toMin = (t: string) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
@@ -79,7 +90,6 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const records = await getAttendanceForExport(DB, date, date);
   const stats   = await getDailyStats(DB, date);
 
-  // Skip if no data
   if (records.length === 0) {
     await sendTelegramMessage({ botToken, chatId },
       `📋 <b>${settings.org_name}</b>\n📅 ${date}\n\n⚠️ No attendance data for this date. Backup skipped.`
@@ -89,14 +99,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     });
   }
 
-  // Summary message
   const summary = buildBackupSummary(
     date, stats.uniquePresentCount, Math.max(0, stats.totalActive - stats.uniquePresentCount),
     stats.totalActive, settings.org_name
   );
   await sendTelegramMessage({ botToken, chatId }, summary);
 
-  // CSV
   const csvHeader = ["Date","Member ID","Name","Seva Role","Session","Location","Time (IST)","Marked By"];
   const csvRows = records.map(r => [
     r.date, r.member_id, r.member_name, r.seva_role,
@@ -112,13 +120,13 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     `📊 CSV — ${date} (${records.length} records)`
   );
 
-  // PDF
   const absentList = await getAbsentList(DB, date);
   const pdfOpts: AttendancePdfOptions = {
     date,
     orgName: settings.org_name,
     appName: settings.app_name,
     presentRows: records.map(r => ({
+      date: r.date,
       memberName: r.member_name ?? "—",
       memberId: r.member_id,
       sevaRole: r.seva_role,
@@ -140,10 +148,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     `📄 PDF — ${date}`
   );
 
-  // Update last backup timestamp
   await setSetting(DB, "telegram_last_backup", new Date().toISOString());
 
-  // Audit log
   await logAudit(DB, {
     actorId: "SYSTEM", actorName: "Telegram Cron", actorRole: "admin",
     action: "telegram_backup_sent",

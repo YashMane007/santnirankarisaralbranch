@@ -62,10 +62,10 @@ export async function requireMember(request: Request, secret: string, db?: D1Dat
       .bind(memberId).first<{ id: string; name: string; is_admin: number; is_super_admin: number; is_active: number }>();
 
     if (!member || !member.is_active) {
-      // Member deactivated — force logout
+      // Member deactivated — show deactivated screen (do NOT force logout to login page)
       const storage = getSessionStorage(secret, request);
       const destroyHeader = await storage.destroySession(session);
-      throw redirect("/auth/login?blocked=1", { headers: { "Set-Cookie": destroyHeader } });
+      throw redirect("/account-deactivated", { headers: { "Set-Cookie": destroyHeader } });
     }
 
     // Return live data from DB (not stale session)

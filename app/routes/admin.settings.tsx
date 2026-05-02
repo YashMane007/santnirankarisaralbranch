@@ -1,4 +1,5 @@
 import { type ActionFunctionArgs, type LoaderFunctionArgs, type MetaFunction, json } from "@remix-run/cloudflare";
+import { Toast } from "~/components/Toast";
 import { Form, useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { useState } from "react";
 import { requireSuperAdmin } from "~/lib/session.server";
@@ -323,6 +324,8 @@ export default function AdminSettingsPage() {
           </div>
         </div>
       )}
+      <Toast message={(ad as any)?.error} type="error" />
+      <Toast message={(ad as any)?.success} type="success" />
     </>
   );
 }
