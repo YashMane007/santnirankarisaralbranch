@@ -1,4 +1,4 @@
-name = "sevadal-attendance"
+name = "santnirankarisaralbranch"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "./build/client"
@@ -19,7 +19,7 @@ bucket_name = "sevadal-media"
 # Paste returned id below:
 [[kv_namespaces]]
 binding = "SEVADAL_CACHE"
-id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+id = "6a825adcbcd5456daadaf273044d2a59"
 
 # ─── Local Development Vars ────────────────────────────────────────────────────
 # Create .dev.vars with:
