@@ -107,6 +107,7 @@ export interface AttendancePdfRow {
   location: string | null;
   timeIST: string;
   markedBy: string;
+  adminMarkedAt?: string | null; // "Sun, 3 May, 2026 (9:30AM)" — only when admin marked
 }
 
 export interface AttendancePdfOptions {
@@ -133,15 +134,16 @@ export function fmtDayDate(dateStr: string): string {
 // "date" key maps to the new Day/Date column. Must come before name so column
 // order is logical. Column key "date" is shared with CSV — no override issues.
 const ALL_COLUMNS = [
-  { key: "sr_no",      label: "Sr.No",       width: 30  },
-  { key: "date",       label: "Day / Date",  width: 85 },
-  { key: "name",       label: "Name",        width: 100 },
-  { key: "id",         label: "Member ID",   width: 65  },
-  { key: "seva_role",  label: "Seva Role",   width: 80  },
-  { key: "session",    label: "Session",     width: 80  },
-  { key: "location",   label: "Location",    width: 90  },
-  { key: "time",       label: "Time (IST)",  width: 60  },
-  { key: "marked_by",  label: "Marked By",   width: 80  },
+  { key: "sr_no",           label: "Sr.No",          width: 25  },
+  { key: "date",             label: "Day / Date",     width: 80  },
+  { key: "name",             label: "Name",           width: 95  },
+  { key: "id",               label: "Member ID",      width: 58  },
+  { key: "seva_role",        label: "Seva Role",      width: 72  },
+  { key: "session",          label: "Session",        width: 65  },
+  { key: "location",         label: "Location",       width: 70  },
+  { key: "time",             label: "Time (IST)",     width: 48  },
+  { key: "marked_by",        label: "Marked By",      width: 68  },
+  { key: "admin_marked_at",  label: "Admin Marked At",width: 85  },
 ];
 
 export function generateAttendancePdf(opts: AttendancePdfOptions): Uint8Array {
@@ -208,6 +210,7 @@ export function generateAttendancePdf(opts: AttendancePdfOptions): Uint8Array {
         { key: "location",  value: row.location ?? "-" },
         { key: "time",      value: row.timeIST },
         { key: "marked_by", value: row.markedBy },
+        { key: "admin_marked_at", value: row.adminMarkedAt ?? "-" },
       ].filter(cell => cols.some(c => c.key === cell.key));
 
       for (let ci = 0; ci < cells.length; ci++) {
@@ -238,4 +241,43 @@ export function fmtIST(iso: string | null): string {
   return new Date(u).toLocaleTimeString("en-IN", {
     hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata"
   });
+}
+
+/** Convert "HH:MM" 24hr string to "H:MMAM/PM" — e.g. "14:52" → "2:52PM" */
+export function fmtTime12hr(t: string | null): string {
+  if (!t) return "-";
+  const [hStr, mStr] = t.split(":");
+  let h = parseInt(hStr, 10);
+  const m = mStr ?? "00";
+  const ampm = h >= 12 ? "PM" : "AM";
+  if (h === 0) h = 12;
+  else if (h > 12) h -= 12;
+  return `${h}:${m}${ampm}`;
+}
+
+/** Short datetime for PDF cells — "8 May 2026 4:01PM" (no parens, fits 85px) */
+export function fmtShortDatetime(date: string | null, time24: string | null): string {
+  if (!date || !time24) return "-";
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const d = new Date(date + "T12:00:00");
+  const [hh, mm] = time24.split(":");
+  let h = parseInt(hh);
+  const ap = h >= 12 ? "PM" : "AM";
+  if (h === 0) h = 12; else if (h > 12) h -= 12;
+  return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()} ${h}:${mm}${ap}`;
+}
+
+/** Full IST datetime formatter — "Sun, 3 May, 2026 (5:15PM)" */
+export function fmtISTFull(date: string | null, markedAt: string | null): string {
+  if (!markedAt) return date ? fmtDayDate(date) : "—";
+  const u = markedAt.endsWith("Z") ? markedAt : markedAt + "Z";
+  const d = new Date(u);
+  const days   = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  // Use date param for calendar info (avoids tz drift on day boundary)
+  const dObj = date ? new Date(date + "T12:00:00") : d;
+  const timeStr = d.toLocaleTimeString("en-IN", {
+    hour: "numeric", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata",
+  }).replace(" am"," AM").replace(" pm"," PM").replace("am","AM").replace("pm","PM");
+  return `${days[dObj.getDay()]}, ${dObj.getDate()} ${months[dObj.getMonth()]}, ${dObj.getFullYear()} (${timeStr})`;
 }

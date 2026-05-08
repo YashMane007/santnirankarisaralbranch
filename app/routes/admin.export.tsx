@@ -25,7 +25,9 @@ const COLUMN_DEFS = [
   { key:"lat",          label:"Latitude"      },
   { key:"lng",          label:"Longitude"     },
   { key:"marked_by_id", label:"Marked By ID"  },
-  { key:"marked_by",    label:"Marked By Name"},
+  { key:"marked_by",        label:"Marked By Name"   },
+  { key:"admin_marked_date", label:"Admin Marked Date" },
+  { key:"admin_marked_time", label:"Admin Marked Time" },
 ];
 
 const STORAGE_KEY = "sevadal_export_cols";
@@ -64,14 +66,25 @@ export default function AdminExportPage() {
     </>
   );
 
-  const saveAndClose = () => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(selectedCols))); } catch {}
-    setShowColPicker(false);
-  };
+  const saveAndClose = () => setShowColPicker(false);
 
-  const selectAll = () => setSelectedCols(new Set(COLUMN_DEFS.map(c => c.key)));
-  const clearAll  = () => setSelectedCols(new Set());
-  const toggle    = (k: string) => setSelectedCols(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const selectAll = () => {
+    const all = new Set(COLUMN_DEFS.map(c => c.key));
+    setSelectedCols(all);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(all))); } catch {}
+  };
+  const clearAll = () => {
+    setSelectedCols(new Set());
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify([])); } catch {}
+  };
+  const toggle = (k: string) => {
+    setSelectedCols(prev => {
+      const n = new Set(prev);
+      n.has(k) ? n.delete(k) : n.add(k);
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(n))); } catch {}
+      return n;
+    });
+  };
 
   const colParam = selectedCols.size === COLUMN_DEFS.length ? "all" : Array.from(selectedCols).join(",");
   const downloadUrl = `/api/export?from=${from}&to=${to}&format=${format}&columns=${encodeURIComponent(colParam)}`;
@@ -199,7 +212,7 @@ export default function AdminExportPage() {
             </div>
             <div className="modal-footer">
               <button type="button" className="btn btn-secondary btn-md" onClick={clearAll}>Clear All</button>
-              <button type="button" className="btn btn-primary btn-md" onClick={saveAndClose} title="Save selection and close">Save & Close</button>
+              <button type="button" className="btn btn-primary btn-md" onClick={saveAndClose} title="Save selection and close">Close</button>
             </div>
           </div>
         </div>

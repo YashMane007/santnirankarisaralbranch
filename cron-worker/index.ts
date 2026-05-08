@@ -1,15 +1,6 @@
 /**
- * Sevadal Backup Cron Worker
+ * Sevadal Cron Worker — runs on schedule, calls main app endpoints.
  * Deploy separately: cd cron-worker && wrangler deploy
- *
- * This tiny worker runs on a cron schedule and calls the main app's
- * /api/telegram-backup endpoint. Deployed as a separate Worker (not Pages).
- *
- * Setup:
- *   1. cd cron-worker
- *   2. Create wrangler.toml (see below)
- *   3. wrangler secret put BACKUP_SECRET
- *   4. wrangler deploy
  *
  * wrangler.toml for this worker:
  * ---
@@ -18,12 +9,17 @@
  * compatibility_date = "2024-09-23"
  *
  * [triggers]
- * # 12:06 AM IST = 18:36 UTC
- * crons = ["36 18 * * *"]
+ * # Change to ONE specific time, e.g. 12:06 AM IST = 18:36 UTC
+ * # For session reminders (minute-level), use: crons = ["* * * * *"]
+ * # For backup only (once a day), use: crons = ["36 18 * * *"]
+ * # Recommended: run every minute so reminders fire on time
+ * crons = ["* * * * *"]
  *
  * [vars]
- * APP_URL = "https://yourdomain.com"
+ * APP_URL = "https://santnirankarisaralbranch.pages.dev"
  * ---
+ *
+ * Secrets: wrangler secret put BACKUP_SECRET
  */
 
 export interface Env {
@@ -31,33 +27,34 @@ export interface Env {
   APP_URL: string;
 }
 
-export default {
-  async scheduled(
-    event: ScheduledEvent,
-    env: Env,
-    ctx: ExecutionContext
-  ): Promise<void> {
-    const url = `${env.APP_URL}/api/telegram-backup?secret=${encodeURIComponent(env.BACKUP_SECRET)}`;
+async function callEndpoint(url: string, label: string): Promise<void> {
+  try {
+    const res  = await fetch(url, { method:"GET", headers:{"User-Agent":"Sevadal-Cron/2.0"} });
+    const body = await res.text();
+    console.log(`[Sevadal Cron] ${label}: ${res.status} — ${body.slice(0,200)}`);
+  } catch (e) {
+    console.error(`[Sevadal Cron] ${label} failed:`, e);
+  }
+}
 
-    try {
-      const res = await fetch(url, {
-        method: "GET",
-        headers: { "User-Agent": "Sevadal-Cron/1.0" },
-      });
-      const body = await res.text();
-      console.log(`[Sevadal Cron] Backup response: ${res.status} — ${body}`);
-    } catch (e) {
-      console.error("[Sevadal Cron] Backup failed:", e);
-    }
+export default {
+  async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
+    const secret = encodeURIComponent(env.BACKUP_SECRET);
+    const base   = env.APP_URL.replace(/\/$/, "");
+
+    // 1. Telegram backup (fires once/day — dedup handled server-side)
+    await callEndpoint(`${base}/api/telegram-backup?secret=${secret}`, "Telegram Backup");
+
+    // 2. Session reminders (runs every minute, server checks if reminder should fire)
+    await callEndpoint(`${base}/api/session-reminders?secret=${secret}`, "Session Reminders");
   },
 
-  // Also handle direct fetch (for manual testing)
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/trigger") {
-      await this.scheduled({} as any, env, {} as any);
-      return new Response("Triggered", { status: 200 });
+      await this.scheduled({} as ScheduledEvent, env, {} as ExecutionContext);
+      return new Response("Triggered", { status:200 });
     }
-    return new Response("Sevadal Backup Cron Worker\nGET /trigger to run manually", { status: 200 });
+    return new Response("Sevadal Cron Worker v2\nGET /trigger to run manually", { status:200 });
   },
 };

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useConfirm } from "~/components/ConfirmModal";
 import { Toast } from "~/components/Toast";
 import { useAdminLayout } from "~/routes/admin";
-import { createMember, listMembers, memberIdExists, resetMemberPin, updateMember, deleteMember, bulkCreateMembers } from "~/lib/db.server";
+import { createMember, listMembers, memberIdExists, resetMemberPin, updateMember, deleteMember, bulkCreateMembers, getMemberRoleCounts } from "~/lib/db.server";
 import { requireAdmin } from "~/lib/session.server";
 import { getAdminPermissions, can } from "~/lib/permissions.server";
 import { logAudit, getClientIp } from "~/lib/audit.server";
@@ -20,9 +20,13 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const sortBy   = url.searchParams.get("sortBy")  ?? "name";
   const sortDir  = (url.searchParams.get("sortDir") ?? "asc") as "asc"|"desc";
   // Non-SA admin cannot see SA members
-  const members  = await listMembers(DB, { search, sortBy, sortDir, excludeSuperAdmins: !session.isSuperAdmin });
+  const [members, roleCounts] = await Promise.all([
+    listMembers(DB, { search, sortBy, sortDir, excludeSuperAdmins: !session.isSuperAdmin }),
+    getMemberRoleCounts(DB),
+  ]);
   return json({
     members,
+    roleCounts,
     search, sortBy, sortDir,
     canViewMembers:    can(perms,"view_members")         || session.isSuperAdmin,
     canAddMembers:     can(perms,"add_members")          || session.isSuperAdmin,
@@ -139,7 +143,7 @@ function SortTh({col,label,sortBy,sortDir,onSort}:{col:string;label:string;sortB
 }
 
 export default function AdminMembersPage() {
-  const { members, search, sortBy, sortDir, canViewMembers, canAddMembers, canEditMembers, canDeleteMembers, canToggleActive, canPromoteAdmin, isSuperAdmin: loaderIsSA } = useLoaderData<typeof loader>();
+  const { members, roleCounts, search, sortBy, sortDir, canViewMembers, canAddMembers, canEditMembers, canDeleteMembers, canToggleActive, canPromoteAdmin, isSuperAdmin: loaderIsSA } = useLoaderData<typeof loader>();
   const { isSuperAdmin } = useAdminLayout();
   const actionData = useActionData<typeof action>();
   const nav = useNavigation();
@@ -170,7 +174,15 @@ export default function AdminMembersPage() {
   return (
     <>
       <div className="admin-topbar">
-        {canViewMembers ? ( <div><h1 className="admin-topbar__title">Members ({filtered.length}/{members.length})</h1></div> )
+        {canViewMembers ? (
+          <div>
+            <h1 className="admin-topbar__title" style={{fontSize:"16px"}}>
+              Members ({roleCounts.members.active}/{roleCounts.members.total})
+              &nbsp;|&nbsp;Admin ({roleCounts.admins.active}/{roleCounts.admins.total})
+              {isSuperAdmin && <span>&nbsp;|&nbsp;Super Admin ({roleCounts.superAdmins.active}/{roleCounts.superAdmins.total})</span>}
+            </h1>
+          </div>
+        )
         : ( <div><h1 className="admin-topbar__title">Members</h1></div> )}
         <div style={{display:"flex",gap:"8px"}}>
           {canAddMembers&&<button className="btn btn-secondary btn-md" type="button" onClick={()=>setShowBulk(true)} title="Import multiple members from a CSV file">📤 Bulk Import</button>}

@@ -27,6 +27,7 @@ export interface AttendanceRecord {
   accuracy: number | null; distance_meters: number | null; schedule_id: number;
   satsang_type: string | null; session_label: string | null;
   marked_by_id: string | null; marked_by_name: string | null;
+  admin_marked_date: string | null; admin_marked_time: string | null;
 }
 export interface SatsangType { id: number; name: string; is_active: number; sort_order: number; }
 export interface SevaRole    { id: number; name: string; is_active: number; sort_order: number; }
@@ -144,8 +145,18 @@ export async function getTodayAttendanceAll(db: D1Database, memberId: string, da
   return (await db.prepare("SELECT * FROM attendance WHERE member_id=? AND date=? ORDER BY marked_at").bind(memberId,date).all<AttendanceRecord>()).results;
 }
 export async function markAttendance(db: D1Database, data:{memberId:string;memberName:string;sevaRole:string|null;locationId:number;locationName:string;date:string;lat:number;lng:number;accuracy:number;distanceMeters:number;scheduleId?:number;satsangType?:string;sessionLabel?:string;markedById?:string;markedByName?:string;}): Promise<void> {
-  await db.prepare(`INSERT INTO attendance (member_id,member_name,seva_role,location_id,location_name,date,marked_at,lat,lng,accuracy,distance_meters,schedule_id,satsang_type,session_label,marked_by_id,marked_by_name) VALUES (?,?,?,?,?,?,datetime('now'),?,?,?,?,?,?,?,?,?) ON CONFLICT(member_id,date,schedule_id) DO NOTHING`)
-    .bind(data.memberId,data.memberName,data.sevaRole??null,data.locationId,data.locationName,data.date,data.lat,data.lng,data.accuracy,data.distanceMeters,data.scheduleId??0,data.satsangType??null,data.sessionLabel??null,data.markedById??null,data.markedByName??null).run();
+  // Store admin marking date/time in separate columns when marked by admin
+  const isAdminMark = !!data.markedById;
+  const nowIST = new Date();
+  const adminDate = isAdminMark
+    ? nowIST.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })
+    : null;
+  const adminTime = isAdminMark
+    ? nowIST.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }).replace(".", ":")
+    : null;
+
+  await db.prepare(`INSERT INTO attendance (member_id,member_name,seva_role,location_id,location_name,date,marked_at,lat,lng,accuracy,distance_meters,schedule_id,satsang_type,session_label,marked_by_id,marked_by_name,admin_marked_date,admin_marked_time) VALUES (?,?,?,?,?,?,datetime('now'),?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(member_id,date,schedule_id) DO NOTHING`)
+    .bind(data.memberId,data.memberName,data.sevaRole??null,data.locationId,data.locationName,data.date,data.lat,data.lng,data.accuracy,data.distanceMeters,data.scheduleId??0,data.satsangType??null,data.sessionLabel??null,data.markedById??null,data.markedByName??null,adminDate,adminTime).run();
 }
 export async function updateAttendance(db: D1Database, id: number, data: Partial<{seva_role:string;location_id:number;location_name:string;date:string;marked_at:string;}>): Promise<void> {
   const fields = Object.keys(data).map(k=>`${k} = ?`);
@@ -427,4 +438,116 @@ export async function getAttendanceTrend(db: D1Database, days = 30): Promise<{da
      WHERE date >= ? GROUP BY date ORDER BY date ASC`
   ).bind(from).all<{date:string;present:number}>();
   return r.results;
+}
+
+// ─── Member Role Counts ───────────────────────────────────────────────────────
+
+export interface MemberRoleCounts {
+  members: { active: number; total: number };
+  admins:  { active: number; total: number };
+  superAdmins: { active: number; total: number };
+}
+
+export async function getMemberRoleCounts(db: D1Database): Promise<MemberRoleCounts> {
+  const rows = await db.prepare(`
+    SELECT
+      SUM(CASE WHEN is_super_admin=1 THEN 1 ELSE 0 END) as sa_total,
+      SUM(CASE WHEN is_super_admin=1 AND is_active=1 THEN 1 ELSE 0 END) as sa_active,
+      SUM(CASE WHEN is_admin=1 AND (is_super_admin IS NULL OR is_super_admin=0) THEN 1 ELSE 0 END) as adm_total,
+      SUM(CASE WHEN is_admin=1 AND (is_super_admin IS NULL OR is_super_admin=0) AND is_active=1 THEN 1 ELSE 0 END) as adm_active,
+      SUM(CASE WHEN (is_admin IS NULL OR is_admin=0) AND (is_super_admin IS NULL OR is_super_admin=0) THEN 1 ELSE 0 END) as mem_total,
+      SUM(CASE WHEN (is_admin IS NULL OR is_admin=0) AND (is_super_admin IS NULL OR is_super_admin=0) AND is_active=1 THEN 1 ELSE 0 END) as mem_active
+    FROM members
+  `).first<{sa_total:number;sa_active:number;adm_total:number;adm_active:number;mem_total:number;mem_active:number}>();
+
+  return {
+    members:    { active: rows?.mem_active ?? 0, total: rows?.mem_total ?? 0 },
+    admins:     { active: rows?.adm_active ?? 0, total: rows?.adm_total ?? 0 },
+    superAdmins:{ active: rows?.sa_active  ?? 0, total: rows?.sa_total  ?? 0 },
+  };
+}
+
+// ─── Schedules for date (for admin mark modals) ───────────────────────────────
+
+export interface ScheduleOption {
+  id: number;
+  location_id: number;
+  location_name: string;
+  label: string;
+  satsang_type_name: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  all_day: number;
+}
+
+export async function getScheduleOptionsForDate(db: D1Database, date: string): Promise<ScheduleOption[]> {
+  const r = await db.prepare(`
+    SELECT ls.id, ls.location_id, l.name as location_name, ls.label,
+           ls.satsang_type_name, ls.start_time, ls.end_time, ls.all_day
+    FROM location_schedules ls
+    JOIN locations l ON l.id = ls.location_id
+    WHERE ls.date = ? AND ls.is_active = 1 AND l.is_active = 1
+    ORDER BY ls.start_time ASC, l.name ASC
+  `).bind(date).all<ScheduleOption>();
+  return r.results;
+}
+
+// ─── Push Subscriptions ───────────────────────────────────────────────────────
+
+export interface PushSub {
+  id: number;
+  member_id: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  user_agent: string | null;
+  created_at: string;
+}
+
+export async function upsertPushSubscription(
+  db: D1Database,
+  data: { member_id: string; endpoint: string; p256dh: string; auth: string; user_agent?: string }
+): Promise<void> {
+  await db.prepare(
+    `INSERT INTO push_subscriptions (member_id, endpoint, p256dh, auth, user_agent)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(member_id, endpoint) DO UPDATE SET p256dh=excluded.p256dh, auth=excluded.auth`
+  ).bind(data.member_id, data.endpoint, data.p256dh, data.auth, data.user_agent ?? null).run();
+}
+
+export async function deletePushSubscription(db: D1Database, memberId: string, endpoint: string): Promise<void> {
+  await db.prepare(
+    "DELETE FROM push_subscriptions WHERE member_id = ? AND endpoint = ?"
+  ).bind(memberId, endpoint).run();
+}
+
+export async function getPushSubscriptionsForMember(db: D1Database, memberId: string): Promise<PushSub[]> {
+  return (await db.prepare("SELECT * FROM push_subscriptions WHERE member_id = ?").bind(memberId).all<PushSub>()).results;
+}
+
+export async function getAllPushSubscriptions(db: D1Database): Promise<PushSub[]> {
+  return (await db.prepare("SELECT * FROM push_subscriptions").all<PushSub>()).results;
+}
+
+export async function deletePushSubscriptionByEndpoint(db: D1Database, endpoint: string): Promise<void> {
+  await db.prepare("DELETE FROM push_subscriptions WHERE endpoint = ?").bind(endpoint).run();
+}
+
+// ─── Notification log (dedup) ─────────────────────────────────────────────────
+
+export async function wasNotificationSent(
+  db: D1Database, type: string, refDate: string, refId?: string
+): Promise<boolean> {
+  const r = await db.prepare(
+    "SELECT id FROM notification_log WHERE notif_type=? AND ref_date=? AND (ref_id=? OR ref_id IS NULL) LIMIT 1"
+  ).bind(type, refDate, refId ?? null).first();
+  return !!r;
+}
+
+export async function logNotification(
+  db: D1Database, memberId: string | null, type: string, refDate: string, refId?: string
+): Promise<void> {
+  await db.prepare(
+    "INSERT INTO notification_log (member_id, notif_type, ref_date, ref_id) VALUES (?, ?, ?, ?)"
+  ).bind(memberId, type, refDate, refId ?? null).run();
 }

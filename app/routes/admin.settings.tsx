@@ -4,6 +4,8 @@ import { Form, useActionData, useLoaderData, useNavigation } from "@remix-run/re
 import { useState } from "react";
 import { requireSuperAdmin } from "~/lib/session.server";
 import { getAppSettings, setSettings } from "~/lib/appsettings.server";
+import { invalidateSettings, invalidateLocations } from "~/lib/kv.server";
+import { sendPushToMembers } from "~/lib/notifications.server";
 import { getKillSwitch, setKillSwitch } from "~/lib/killswitch.server";
 import { wipeAuditLog, purgeOldAuditLogs, logAudit, getClientIp } from "~/lib/audit.server";
 import { getMemberById } from "~/lib/db.server";
@@ -13,6 +15,7 @@ export const meta: MetaFunction = () => [{ title: "Settings — Sevadal Admin" }
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const { DB, SESSION_SECRET } = context.cloudflare.env;
+  const kv = (context.cloudflare.env as any).SEVADAL_CACHE as KVNamespace | undefined;
   await requireSuperAdmin(request, SESSION_SECRET, DB);
   const [appSettings, ks] = await Promise.all([getAppSettings(DB), getKillSwitch(DB)]);
   // Estimate storage usage
@@ -35,6 +38,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
 export async function action({ request, context }: ActionFunctionArgs) {
   const { DB, SESSION_SECRET } = context.cloudflare.env;
+  const kv = (context.cloudflare.env as any).SEVADAL_CACHE as KVNamespace | undefined;
   const session = await requireSuperAdmin(request, SESSION_SECRET, DB);
   const form = await request.formData();
   const intent = form.get("intent") as string;
@@ -114,6 +118,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     await setSettings(DB, {
       location_history_enabled: form.getAll("location_history_enabled").includes("1") ? "1" : "0",
     });
+    await invalidateSettings(kv);
     return json({ success: "Settings saved." });
   }
 
@@ -295,6 +300,68 @@ export default function AdminSettingsPage() {
               <strong>Cloudflare Free Plan limits:</strong> D1 database: 5GB storage, 5M reads/day, 100K writes/day.
               R2 storage: 10GB for photos/files. At current usage you are well within free limits.
               To see exact usage, visit <strong>dash.cloudflare.com → D1 / R2</strong>.
+            </div>
+          </div>
+        </div>
+
+
+        {/* ── Push Notifications ─────────────────────────────────────────── */}
+        <div className="card">
+          <div className="card-header"><h3>🔔 Push Notifications</h3></div>
+          <div className="card-body" style={{ display:"flex", flexDirection:"column", gap:"16px" }}>
+            <div style={{ fontSize:"12px", color:"var(--gray-500)", background:"var(--info-light)", padding:"10px 12px", borderRadius:"var(--radius-sm)" }}>
+              Push notifications are sent via browser Web Push (works on Android Chrome, Firefox, Edge; iOS 16.4+ Safari). Members must allow notifications on their device.
+            </div>
+            <Form method="post" style={{ display:"flex", flexDirection:"column", gap:"12px" }}>
+              <input type="hidden" name="intent" value="notification-settings" />
+              <label style={{ display:"flex", alignItems:"center", gap:"8px", cursor:"pointer", fontSize:"14px" }}>
+                <input type="checkbox" name="notifications_enabled" value="1"
+                  defaultChecked={appSettings.notifications_enabled}
+                  style={{ width:"18px", height:"18px" }} />
+                Enable push notifications
+              </label>
+              <label style={{ display:"flex", alignItems:"center", gap:"8px", cursor:"pointer", fontSize:"14px" }}>
+                <input type="checkbox" name="reminder_enabled" value="1"
+                  defaultChecked={appSettings.reminder_enabled}
+                  style={{ width:"18px", height:"18px" }} />
+                Send pre-session reminder notifications
+              </label>
+              <div className="form-group">
+                <label className="form-label">Reminder time (minutes before session starts)</label>
+                <select name="reminder_minutes_before" className="form-select" style={{ width:"auto" }}
+                  defaultValue={String(appSettings.reminder_minutes_before)}>
+                  <option value="15">15 minutes before</option>
+                  <option value="30">30 minutes before</option>
+                  <option value="60">1 hour before</option>
+                  <option value="120">2 hours before</option>
+                  <option value="180">3 hours before</option>
+                  <option value="360">6 hours before</option>
+                  <option value="720">12 hours before</option>
+                  <option value="1440">24 hours (day before)</option>
+                </select>
+              </div>
+              <div><button type="submit" className="btn btn-primary btn-sm">Save Notification Settings</button></div>
+            </Form>
+            <hr style={{ borderColor:"var(--gray-100)", margin:"4px 0" }} />
+            <div>
+              <h4 style={{ fontSize:"13px", fontWeight:700, marginBottom:"10px" }}>Send Manual Notification</h4>
+              <Form method="post" style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+                <input type="hidden" name="intent" value="send-notification" />
+                <div style={{ display:"flex", gap:"12px", flexWrap:"wrap" }}>
+                  <label style={{ display:"flex", alignItems:"center", gap:"4px", fontSize:"13px", cursor:"pointer" }}>
+                    <input type="radio" name="target" value="all" defaultChecked style={{ accentColor:"var(--primary)" }} />
+                    All members
+                  </label>
+                  <label style={{ display:"flex", alignItems:"center", gap:"4px", fontSize:"13px", cursor:"pointer" }}>
+                    <input type="radio" name="target" value="member" style={{ accentColor:"var(--primary)" }} />
+                    Specific member
+                  </label>
+                </div>
+                <input name="notif_member_id" type="text" className="form-input" placeholder="Member ID (if specific member)" style={{ maxWidth:"200px" }} />
+                <input name="notif_title" type="text" className="form-input" placeholder="Notification title" defaultValue="Sevadal" />
+                <textarea name="notif_body" className="form-input" placeholder="Notification message" rows={2} style={{ resize:"vertical" }} />
+                <div><button type="submit" className="btn btn-secondary btn-sm">📤 Send Now</button></div>
+              </Form>
             </div>
           </div>
         </div>

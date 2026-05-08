@@ -5,8 +5,10 @@ import {
   Scripts,
   ScrollRestoration,
   useNavigation,
+  useLoaderData,
 } from "@remix-run/react";
-import type { LinksFunction } from "@remix-run/cloudflare";
+import { json } from "@remix-run/cloudflare";
+import type { LinksFunction, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import appCss from "~/styles/app.css?url";
 
 export const links: LinksFunction = () => [
@@ -21,6 +23,20 @@ export const links: LinksFunction = () => [
   { rel: "icon", href: "/favicon.ico" },
   { rel: "apple-touch-icon", href: "/icon-192.png" },
 ];
+
+
+export async function loader({ context }: LoaderFunctionArgs) {
+  const env = context.cloudflare.env as any;
+  return json({ vapidPublicKey: (env.VAPID_PUBLIC_KEY as string) ?? "" });
+}
+
+
+function VapidKeyScript() {
+  let key = "";
+  try { key = (useLoaderData<any>() as any)?.vapidPublicKey ?? ""; } catch {}
+  if (!key) return null;
+  return <script dangerouslySetInnerHTML={{ __html: `window.__VAPID_PUBLIC_KEY__=${JSON.stringify(key)};` }} />;
+}
 
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -40,6 +56,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           Stored on window.__pwaPrompt so PWAInstallPrompt component can read it.
         */}
         <script dangerouslySetInnerHTML={{ __html: `window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__pwaPrompt=e;});` }} />
+        <VapidKeyScript />
       </head>
       <body>
         {children}
@@ -49,11 +66,50 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <script
           dangerouslySetInnerHTML={{
             __html: `
-              if ('serviceWorker' in navigator) {
-                window.addEventListener('load', () => {
-                  navigator.serviceWorker.register('/sw.js').catch(() => {});
-                });
-              }
+(function() {
+  if (!('serviceWorker' in navigator)) return;
+  window.addEventListener('load', async () => {
+    try {
+      const reg = await navigator.serviceWorker.register('/sw.js');
+
+      // ── Push subscription setup ─────────────────────────────────────────
+      if (!('PushManager' in window)) return;
+      if (!('__VAPID_PUBLIC_KEY__' in window)) return;
+
+      const vapidKey = window.__VAPID_PUBLIC_KEY__;
+      if (!vapidKey) return;
+
+      const permission = Notification.permission;
+      if (permission === 'denied') return;
+
+      let sub = await reg.pushManager.getSubscription();
+
+      // Request permission and subscribe if not yet subscribed
+      if (!sub && permission !== 'denied') {
+        const granted = permission === 'granted'
+          ? 'granted'
+          : await Notification.requestPermission();
+        if (granted !== 'granted') return;
+      }
+
+      if (!sub) {
+        try {
+          const key = Uint8Array.from(atob(vapidKey.replace(/-/g,'+').replace(/_/g,'/')), c => c.charCodeAt(0));
+          sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+        } catch(e) { console.warn('Push subscribe failed', e); return; }
+      }
+
+      // Send subscription to server
+      const p256dh = btoa(String.fromCharCode(...new Uint8Array(sub.getKey('p256dh')))).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');
+      const auth   = btoa(String.fromCharCode(...new Uint8Array(sub.getKey('auth')))).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');
+      fetch('/api/push-subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify({ action:'subscribe', endpoint: sub.endpoint, p256dh, auth }),
+      }).catch(() => {});
+    } catch(e) { console.warn('SW/Push setup error', e); }
+  });
+})();
             `,
           }}
         />

@@ -1,33 +1,24 @@
--- Sevadal Attendance — Migration v5 → v6 (30 March 2026)
--- Upgrades announcement visibility system from single radio value to independent checkboxes
---
--- Local:  wrangler d1 execute sevadal-db --local --file=./migration-v6.sql
--- Prod:   wrangler d1 execute sevadal-db --file=./migration-v6.sql
+-- Migration v6: Push Notifications + Notification Log
 
--- Add new column for JSON array-based visibility (backwards compat)
-ALTER TABLE announcements ADD COLUMN show_to_array TEXT;
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  member_id  TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+  endpoint   TEXT NOT NULL,
+  p256dh     TEXT NOT NULL,
+  auth       TEXT NOT NULL,
+  user_agent TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(member_id, endpoint)
+);
 
--- Auto-migrate existing single-value show_to to JSON array
--- OLD: show_to = 'public' or 'all' → NEW: show_to_array = '["guest","member","admin"]'
--- OLD: show_to = 'members'       → NEW: show_to_array = '["member","admin"]'
--- OLD: show_to = 'admins'        → NEW: show_to_array = '["admin"]'
--- OLD: show_to = null/empty      → NEW: show_to_array = '[]' (invisible)
+CREATE TABLE IF NOT EXISTS notification_log (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  member_id   TEXT,
+  notif_type  TEXT NOT NULL,
+  ref_date    TEXT,
+  ref_id      TEXT,
+  sent_at     TEXT DEFAULT (datetime('now'))
+);
 
-UPDATE announcements SET show_to_array = '["guest","member","admin"]' 
-WHERE show_to = 'public' OR show_to = 'all' OR show_to IS NULL;
-
-UPDATE announcements SET show_to_array = '["member","admin"]' 
-WHERE show_to = 'members';
-
-UPDATE announcements SET show_to_array = '["admin"]' 
-WHERE show_to = 'admins';
-
--- Keep show_to for backwards compatibility (old code still reads it)
--- New code will primarily use show_to_array
-
--- Index for performance on the new array column
-CREATE INDEX IF NOT EXISTS idx_announcements_show_to_array ON announcements(show_to_array);
-
--- Settings for telegram backup (mandatory feature)
-INSERT OR IGNORE INTO settings (key, value) VALUES 
-  ('telegram_backup_mandatory', '1');
+CREATE INDEX IF NOT EXISTS idx_push_subs_member ON push_subscriptions(member_id);
+CREATE INDEX IF NOT EXISTS idx_notif_log_type_date ON notification_log(notif_type, ref_date);

@@ -8,7 +8,7 @@
 import { type LoaderFunctionArgs, type ActionFunctionArgs } from "@remix-run/cloudflare";
 import { requireAdmin } from "~/lib/session.server";
 import { getAttendanceForExport, getAbsentList } from "~/lib/db.server";
-import { generateAttendancePdf, fmtIST, fmtDayDate, type AttendancePdfOptions } from "~/lib/pdf.server";
+import { generateAttendancePdf, fmtIST, fmtISTFull, fmtDayDate as fmtDayDateExport, fmtTime12hr, fmtShortDatetime, fmtDayDate, type AttendancePdfOptions } from "~/lib/pdf.server";
 import { logAudit, getClientIp } from "~/lib/audit.server";
 import { getAppSettings } from "~/lib/appsettings.server";
 import { getAdminPermissions, can } from "~/lib/permissions.server";
@@ -39,7 +39,9 @@ const ALL_CSV_COLUMNS = [
   { key: "lat",          label: "Lat",            get: (r: any) => r.lat },
   { key: "lng",          label: "Lng",            get: (r: any) => r.lng },
   { key: "marked_by_id", label: "Marked By ID",   get: (r: any) => r.marked_by_id ?? "Self" },
-  { key: "marked_by",    label: "Marked By Name", get: (r: any) => r.marked_by_name ?? "Self" },
+  { key: "marked_by",        label: "Marked By Name",   get: (r: any) => r.marked_by_name ?? "Self" },
+  { key: "admin_marked_date", label: "Admin Marked Date", get: (r: any) => r.admin_marked_date ?? "—" },
+  { key: "admin_marked_time", label: "Admin Marked Time", get: (r: any) => r.admin_marked_time ? fmtTime12hr(r.admin_marked_time) : "—" },
 ];
 
 function buildCSV(records: any[], columns: string[]): string {

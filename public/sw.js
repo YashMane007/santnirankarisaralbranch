@@ -1,132 +1,163 @@
 /**
- * Sevadal Attendance — Service Worker
+ * Sevadal Attendance — Service Worker v3
  *
- * Strategy:
- *  - App shell (HTML navigations): network-first with offline fallback
- *  - Static assets (JS/CSS/fonts): stale-while-revalidate
- *  - API / form POST: always network-only (never cache attendance actions)
- *
- * Auto-update: when a new SW is detected it immediately activates (skipWaiting),
- * then clients reload once. No user action needed.
+ * Strategies:
+ *  - Static assets (JS/CSS/fonts/images): stale-while-revalidate
+ *  - Member pages (dashboard/attendance/profile/news): network-first + offline cache
+ *  - API GET (member-specific data): stale-while-revalidate
+ *  - POST/mutations: network-only (never cache)
+ *  - Push notifications: display + navigate on click
  */
 
-//YM
-const CACHE_NAME = "sevadal-v1";
-//  const VERSION = "v2.0";
-//  const CACHE_NAME = `sevadal-${VERSION}`;
-//  const CACHE_ASSETS = "sevadal-assets-v1";
+const CACHE_NAME    = "sevadal-v3";
+const OFFLINE_CACHE = "sevadal-offline-v3";
+const DATA_CACHE    = "sevadal-data-v3";
 
-// Static assets to pre-cache on install
-const PRECACHE_URLS = [
-  "/offline.html",
+const PRECACHE = ["/offline.html", "/icon-192.png", "/manifest.json"];
+
+// Pages to cache for offline member use
+const MEMBER_OFFLINE_PATHS = [
+  "/dashboard",
+  "/attendance",
+  "/profile",
+  "/news",
 ];
-//  const PRECACHE_URLS = [
-//    "/",
-//    "/offline.html",
-//    "/icon-192.png",
-//    "/icon-512.png",
-//    "/manifest.json",
-//  ];
-//YM
 
-// ── Install: pre-cache offline page ──────────────────────────────────────────
+// ── Install ──────────────────────────────────────────────────────────────────
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches
-      .open(CACHE_NAME)
-      .then((cache) => cache.addAll(PRECACHE_URLS))
-      .then(() => self.skipWaiting()) // activate immediately
+    caches.open(OFFLINE_CACHE)
+      .then(c => c.addAll(PRECACHE))
+      .then(() => self.skipWaiting())
   );
 });
 
-// ── Activate: clean up old caches ────────────────────────────────────────────
+// ── Activate ─────────────────────────────────────────────────────────────────
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches
-      .keys()
-      .then((keys) =>
-        Promise.all(
-          keys
-            .filter((k) => k !== CACHE_NAME)
-            .map((k) => caches.delete(k))
-        )
-      )
+    caches.keys()
+      .then(keys => Promise.all(
+        keys.filter(k => !["sevadal-v3","sevadal-offline-v3","sevadal-data-v3"].includes(k))
+            .map(k => caches.delete(k))
+      ))
       .then(() => self.clients.claim())
   );
-  // Tell all open tabs to reload so they get the new SW immediately
-  self.clients
-    .matchAll({ includeUncontrolled: true, type: "window" })
-    .then((clients) => {
-      clients.forEach((client) => client.navigate(client.url));
-    });
+  self.clients.matchAll({ includeUncontrolled:true, type:"window" })
+    .then(clients => clients.forEach(c => c.navigate(c.url)));
 });
 
 // ── Fetch ─────────────────────────────────────────────────────────────────────
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
-
-  // Never intercept non-GET or same-origin API/form POSTs
   if (request.method !== "GET") return;
-  if (!url.origin.includes(self.location.origin)) return;
+  if (url.origin !== self.location.origin) return;
 
-  // Static assets: stale-while-revalidate
-  if (
-    url.pathname.match(/\.(js|css|woff2?|ttf|otf|png|jpg|webp|svg|ico)$/)
-  ) {
-    event.respondWith(
-      caches.open(CACHE_NAME).then(async (cache) => {
-        const cached = await cache.match(request);
-        const networkFetch = fetch(request).then((res) => {
-          if (res.ok) cache.put(request, res.clone());
-          return res;
-        });
-        return cached ?? networkFetch;
-      })
-    );
+  // Static assets — stale-while-revalidate (instant load)
+  if (url.pathname.match(/\.(js|css|woff2?|ttf|otf|png|jpg|jpeg|webp|svg|ico)$/)) {
+    event.respondWith(swrAsset(request));
     return;
   }
 
-  // Navigations: network-first, offline fallback
+  // Member data API — stale-while-revalidate with DATA_CACHE
+  if (url.pathname.startsWith("/api/member-") || url.pathname.startsWith("/api/news")) {
+    event.respondWith(swrData(request));
+    return;
+  }
+
+  // Member-facing page navigations — network-first + cache for offline
   if (request.mode === "navigate") {
-    event.respondWith(
-      fetch(request).catch(() =>
-        caches.match("/offline.html").then(
-          (r) => r ?? new Response("Offline", { status: 503 })
+    const isMemberPage = MEMBER_OFFLINE_PATHS.some(p => url.pathname === p || url.pathname.startsWith(p + "?"));
+    if (isMemberPage) {
+      event.respondWith(networkFirstCache(request));
+    } else {
+      event.respondWith(
+        fetch(request).catch(() =>
+          caches.match("/offline.html").then(r => r ?? new Response("Offline", { status:503 }))
         )
-      )
-    );
+      );
+    }
     return;
   }
 });
 
-//YM
-// NEW: Smart caching strategies
-//  async function cacheFirstStrategy(request, cacheName) {
-//    const cache = await caches.open(cacheName);
-//    const cached = await cache.match(request);
-//    if (cached) {
-//      // Return cached, update in background
-//      fetch(request).then(response => {
-//        if (response.ok) cache.put(request, response.clone());
-//      }).catch(() => {});
-//      return cached;
-//    }
-//    // Not cached, fetch and cache
-//    const response = await fetch(request);
-//    if (response.ok) cache.put(request, response.clone());
-//    return response;
-//  }
+async function swrAsset(req) {
+  const cache  = await caches.open(CACHE_NAME);
+  const cached = await cache.match(req);
+  const fresh  = fetch(req).then(res => { if (res.ok) cache.put(req, res.clone()); return res; }).catch(() => null);
+  return cached ?? await fresh;
+}
 
-// // Static assets: cache-first (instant loading)
-//  if (url.pathname.match(/\.(js|css|woff2?|ttf|otf|png|jpg|jpeg|webp|svg|ico|json)$/)) {
-//    event.respondWith(cacheFirstStrategy(request, CACHE_ASSETS));
-//    return;
-//  }
+async function swrData(req) {
+  const cache  = await caches.open(DATA_CACHE);
+  const cached = await cache.match(req);
+  const key    = req.url;
+  if (cached) {
+    // Update in background
+    fetch(req).then(res => { if (res.ok) cache.put(req, res.clone()); }).catch(() => {});
+    return cached;
+  }
+  const res = await fetch(req).catch(() => null);
+  if (res?.ok) cache.put(req, res.clone());
+  return res ?? new Response(JSON.stringify({ error:"offline" }), { status:503, headers:{"Content-Type":"application/json"} });
+}
 
-// // Auto-cleanup old caches
-//  const oldCaches = cacheNames.filter(
-//    name => name.startsWith("sevadal-") && name !== CACHE_NAME && name !== CACHE_ASSETS
-//  );
-//  return Promise.all(oldCaches.map(cache => caches.delete(cache)));
-//YM
+async function networkFirstCache(req) {
+  const cache = await caches.open(OFFLINE_CACHE);
+  try {
+    const res = await fetch(req);
+    if (res.ok) cache.put(req, res.clone());
+    return res;
+  } catch {
+    const cached = await cache.match(req);
+    return cached ?? cache.match("/offline.html").then(r => r ?? new Response("Offline", { status:503 }));
+  }
+}
+
+// ── Push Notifications ────────────────────────────────────────────────────────
+self.addEventListener("push", (event) => {
+  let data = { title:"Sevadal", body:"New notification", icon:"/icon-192.png", badge:"/icon-192.png", url:"/" };
+  if (event.data) {
+    try { Object.assign(data, event.data.json()); } catch {}
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body:  data.body,
+      icon:  data.icon  || "/icon-192.png",
+      badge: data.badge || "/icon-192.png",
+      tag:   data.tag   || "sevadal-notif",
+      data:  { url: data.url || "/" },
+      vibrate: [200, 100, 200],
+      requireInteraction: false,
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = event.notification.data?.url || "/";
+  event.waitUntil(
+    self.clients.matchAll({ type:"window", includeUncontrolled:true }).then(clients => {
+      for (const c of clients) {
+        if (c.url === targetUrl && "focus" in c) return c.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
+    })
+  );
+});
+
+self.addEventListener("pushsubscriptionchange", (event) => {
+  event.waitUntil(
+    self.registration.pushManager.subscribe(event.oldSubscription.options)
+      .then(sub => fetch("/api/push-subscribe", {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify({
+          action: "subscribe",
+          endpoint: sub.endpoint,
+          p256dh: btoa(String.fromCharCode(...new Uint8Array(sub.getKey("p256dh")))).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_"),
+          auth:   btoa(String.fromCharCode(...new Uint8Array(sub.getKey("auth")))).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_"),
+        }),
+      }))
+  );
+});

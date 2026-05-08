@@ -1,6 +1,5 @@
 /**
  * App Settings — reads/writes key-value pairs in the `settings` D1 table.
- * Extends the existing kill-switch settings with app-wide config.
  */
 
 export interface AppSettings {
@@ -16,7 +15,11 @@ export interface AppSettings {
   telegram_backup_days: string;
   telegram_last_backup: string;
   location_history_enabled: boolean;
-  export_default_columns: string; // comma-separated or "all"
+  export_default_columns: string;
+  // Push notifications
+  notifications_enabled: boolean;
+  reminder_enabled: boolean;
+  reminder_minutes_before: number; // minutes before session start to send reminder
 }
 
 const DEFAULTS: AppSettings = {
@@ -33,6 +36,9 @@ const DEFAULTS: AppSettings = {
   telegram_last_backup: "",
   location_history_enabled: true,
   export_default_columns: "all",
+  notifications_enabled: false,
+  reminder_enabled: false,
+  reminder_minutes_before: 60,
 };
 
 export async function getAppSettings(db: D1Database): Promise<AppSettings> {
@@ -57,6 +63,9 @@ export async function getAppSettings(db: D1Database): Promise<AppSettings> {
     telegram_last_backup:     map["telegram_last_backup"]     ?? "",
     location_history_enabled: (map["location_history_enabled"] ?? "1") === "1",
     export_default_columns:   map["export_default_columns"]   ?? DEFAULTS.export_default_columns,
+    notifications_enabled:    (map["notifications_enabled"]   ?? "0") === "1",
+    reminder_enabled:         (map["reminder_enabled"]        ?? "0") === "1",
+    reminder_minutes_before:  parseInt(map["reminder_minutes_before"] ?? "60"),
   };
 }
 
@@ -76,7 +85,6 @@ export async function setSettings(
   }
 }
 
-/** Get a single setting value with fallback */
 export async function getSetting(
   db: D1Database,
   key: string,

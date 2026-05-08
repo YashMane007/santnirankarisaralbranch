@@ -4,19 +4,38 @@ compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "./build/client"
 
 # ─── D1 Database ───────────────────────────────────────────────────────────────
-# After running: wrangler d1 create sevadal-db
-# Paste the returned database_id below.
 [[d1_databases]]
 binding = "DB"
 database_name = "sevadal-db"
 database_id = "17b5fde2-8457-4896-8377-2c804edd8d43"
 
 # ─── R2 Bucket ─────────────────────────────────────────────────────────────────
-# After running: wrangler r2 bucket create sevadal-media
 [[r2_buckets]]
 binding = "BUCKET"
 bucket_name = "sevadal-media"
 
+# ─── KV Namespace (caching + offline data versions) ───────────────────────────
+# Run once: wrangler kv namespace create SEVADAL_CACHE
+# Paste returned id below:
+[[kv_namespaces]]
+binding = "SEVADAL_CACHE"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
 # ─── Local Development Vars ────────────────────────────────────────────────────
 # Create .dev.vars with:
-#   SESSION_SECRET=your-random-32-char-string-here
+#   SESSION_SECRET=your-32-char-secret
+#   TELEGRAM_BOT_TOKEN=...
+#   TELEGRAM_CHAT_ID=...
+#   BACKUP_SECRET=...
+#   VAPID_PUBLIC_KEY=BNqhUAg0UMd4QiWVGPuUYQvcVk8-UzGLJMpfLt_iGNRnQ0zAvgcUKlgk9xJZXRcAesL0AWUkiLpQHnoSVIdXlio
+#   VAPID_PRIVATE_KEY_JWK={"key_ops":["sign"],"ext":true,"kty":"EC","x":"2qFQCDRQx3hCJZUY-5RhC9xWTz5TMYskyl8u3-IY1Gc","y":"Q0zAvgcUKlgk9xJZXRcAesL0AWUkiLpQHnoSVIdXlio","crv":"P-256","d":"NJsd6PYjKxPWQiJuDKTlpEtS96cqAroG4foRSyAWIzI"}
+#   VAPID_SUBJECT=mailto:admin@yourdomain.com
+
+# ─── Production secrets (run once each) ───────────────────────────────────────
+# wrangler secret put SESSION_SECRET
+# wrangler secret put TELEGRAM_BOT_TOKEN
+# wrangler secret put TELEGRAM_CHAT_ID
+# wrangler secret put BACKUP_SECRET
+# wrangler secret put VAPID_PUBLIC_KEY
+# wrangler secret put VAPID_PRIVATE_KEY_JWK
+# wrangler secret put VAPID_SUBJECT
