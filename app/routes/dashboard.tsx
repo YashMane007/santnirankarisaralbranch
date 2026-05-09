@@ -141,6 +141,31 @@ export default function DashboardPage() {
   const [sevaRoleError, setSevaRoleError] = useState(false);
   const requestGps = useCallback(()=>{
     setGps({status:"loading"});
+    // ── Notification permission ──────────────────────────────────────────────
+    // Request HERE (same user-gesture context as GPS) so both dialogs appear
+    // together. root.tsx only subscribes when permission is already granted.
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      Notification.requestPermission().then(perm => {
+        if (perm !== "granted") return;
+        if (!("serviceWorker" in navigator)) return;
+        navigator.serviceWorker.ready.then(reg => {
+          if (!("PushManager" in window)) return Promise.resolve(null);
+          const vapidKey = (window as any).__VAPID_PUBLIC_KEY__;
+          if (!vapidKey) return Promise.resolve(null);
+          return reg.pushManager.getSubscription().then((existing: PushSubscription | null) => {
+            if (existing) return existing;
+            const key = Uint8Array.from(atob(vapidKey.replace(/-/g,"+").replace(/_/g,"/")), (c:string) => c.charCodeAt(0));
+            return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+          });
+        }).then((sub: any) => {
+          if (!sub) return;
+          const p256dh = btoa(String.fromCharCode(...new Uint8Array(sub.getKey("p256dh")))).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");
+          const auth   = btoa(String.fromCharCode(...new Uint8Array(sub.getKey("auth")))).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");
+          fetch("/api/push-subscribe",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"subscribe",endpoint:sub.endpoint,p256dh,auth})}).catch(()=>{});
+        }).catch(()=>{});
+      }).catch(()=>{});
+    }
+    // ────────────────────────────────────────────────────────────────────────
     navigator.geolocation.getCurrentPosition(
       p=>setGps({status:"success",lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy}),
       e=>setGps({status:"error",message:e.code===1?"Location denied. Allow permission.":"Cannot get GPS."}),

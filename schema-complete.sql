@@ -243,3 +243,39 @@ CREATE INDEX IF NOT EXISTS idx_location_history       ON location_history(member
 CREATE INDEX IF NOT EXISTS idx_announcements_active   ON announcements(is_active, expires_at);
 CREATE INDEX IF NOT EXISTS idx_announcements_show_to_array ON announcements(show_to_array);
 CREATE INDEX IF NOT EXISTS idx_session_history_date   ON session_history(date);
+
+-- ============================================================================
+-- MIGRATION v6: Push Notifications + Notification Log
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  member_id  TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+  endpoint   TEXT NOT NULL,
+  p256dh     TEXT NOT NULL,
+  auth       TEXT NOT NULL,
+  user_agent TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(member_id, endpoint)
+);
+
+CREATE TABLE IF NOT EXISTS notification_log (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  member_id   TEXT,
+  notif_type  TEXT NOT NULL,
+  ref_date    TEXT,
+  ref_id      TEXT,
+  sent_at     TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_subs_member ON push_subscriptions(member_id);
+CREATE INDEX IF NOT EXISTS idx_notif_log_type_date ON notification_log(notif_type, ref_date);
+
+-- ============================================================================
+-- MIGRATION v7: Admin-marked datetime columns on attendance table
+-- ============================================================================
+
+-- These columns store the date (YYYY-MM-DD) and time (HH:MM 24hr) when an
+-- admin manually marked a member's attendance. Self-marked rows leave them NULL.
+ALTER TABLE attendance ADD COLUMN admin_marked_date TEXT;
+ALTER TABLE attendance ADD COLUMN admin_marked_time TEXT;

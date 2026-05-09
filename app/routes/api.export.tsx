@@ -119,6 +119,10 @@ async function handleExport(request: Request, DB: D1Database, SESSION_SECRET: st
       location: r.location_name,
       timeIST: fmtIST(r.marked_at),
       markedBy: r.marked_by_id ? `${r.marked_by_name} (${r.marked_by_id})` : "Self",
+      // Show short datetime only when admin marked; self-marked rows show "-"
+      adminMarkedAt: r.marked_by_id
+        ? fmtShortDatetime(r.admin_marked_date ?? null, r.admin_marked_time ?? null)
+        : "-",
     }));
     const pdfOpts: AttendancePdfOptions = {
       date: from === to ? from : `${from} to ${to}`,

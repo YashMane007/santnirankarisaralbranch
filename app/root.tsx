@@ -73,24 +73,20 @@ export function Layout({ children }: { children: React.ReactNode }) {
       const reg = await navigator.serviceWorker.register('/sw.js');
 
       // ── Push subscription setup ─────────────────────────────────────────
+      // NOTE: Notification.requestPermission() is NOT called here.
+      // dashboard.tsx requests it alongside the GPS permission so both
+      // dialogs appear together (user-gesture context). Here we only
+      // re-subscribe on subsequent page loads when permission is already granted.
       if (!('PushManager' in window)) return;
       if (!('__VAPID_PUBLIC_KEY__' in window)) return;
 
       const vapidKey = window.__VAPID_PUBLIC_KEY__;
       if (!vapidKey) return;
 
-      const permission = Notification.permission;
-      if (permission === 'denied') return;
+      // Only proceed if user has already granted notification permission
+      if (Notification.permission !== 'granted') return;
 
       let sub = await reg.pushManager.getSubscription();
-
-      // Request permission and subscribe if not yet subscribed
-      if (!sub && permission !== 'denied') {
-        const granted = permission === 'granted'
-          ? 'granted'
-          : await Notification.requestPermission();
-        if (granted !== 'granted') return;
-      }
 
       if (!sub) {
         try {
