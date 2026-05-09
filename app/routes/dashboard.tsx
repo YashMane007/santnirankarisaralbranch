@@ -150,7 +150,7 @@ export default function DashboardPage() {
         if (!("serviceWorker" in navigator)) return;
         navigator.serviceWorker.ready.then(reg => {
           if (!("PushManager" in window)) return Promise.resolve(null);
-          const vapidKey = (window as any).__VAPID_PUBLIC_KEY__;
+          const vapidKey = document.querySelector('meta[name="vapid-public-key"]')?.content || '';
           if (!vapidKey) return Promise.resolve(null);
           return reg.pushManager.getSubscription().then((existing: PushSubscription | null) => {
             if (existing) return existing;

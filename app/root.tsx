@@ -31,11 +31,12 @@ export async function loader({ context }: LoaderFunctionArgs) {
 }
 
 
-function VapidKeyScript() {
+// Read VAPID public key from <meta name="vapid-public-key"> — avoids CSP inline-script issues.
+function VapidKeyMeta() {
   let key = "";
   try { key = (useLoaderData<any>() as any)?.vapidPublicKey ?? ""; } catch {}
   if (!key) return null;
-  return <script dangerouslySetInnerHTML={{ __html: `window.__VAPID_PUBLIC_KEY__=${JSON.stringify(key)};` }} />;
+  return <meta name="vapid-public-key" content={key} />;
 }
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -56,7 +57,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           Stored on window.__pwaPrompt so PWAInstallPrompt component can read it.
         */}
         <script dangerouslySetInnerHTML={{ __html: `window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__pwaPrompt=e;});` }} />
-        <VapidKeyScript />
+        <VapidKeyMeta />
       </head>
       <body>
         {children}
@@ -78,9 +79,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
       // dialogs appear together (user-gesture context). Here we only
       // re-subscribe on subsequent page loads when permission is already granted.
       if (!('PushManager' in window)) return;
-      if (!('__VAPID_PUBLIC_KEY__' in window)) return;
 
-      const vapidKey = window.__VAPID_PUBLIC_KEY__;
+      // Read VAPID public key from <meta> tag — inline scripts blocked by CSP
+      // cannot set window.__VAPID_PUBLIC_KEY__, so we use a meta tag instead.
+      const vapidKey = document.querySelector('meta[name="vapid-public-key"]')?.content || '';
       if (!vapidKey) return;
 
       // Only proceed if user has already granted notification permission
