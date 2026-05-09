@@ -114,6 +114,39 @@ export async function action({ request, context }: ActionFunctionArgs) {
     }
   }
 
+  if (intent === "notification-settings") {
+    await setSettings(DB, {
+      notifications_enabled:   form.getAll("notifications_enabled").includes("1"),
+      reminder_enabled:        form.getAll("reminder_enabled").includes("1"),
+      reminder_minutes_before: parseInt((form.get("reminder_minutes_before") as string) || "60", 10),
+    });
+    if (kv) await invalidateSettings(kv);
+    return json({ success: "Notification settings saved." });
+  }
+
+  if (intent === "send-notification") {
+    const env = context.cloudflare.env as any;
+    const vapidPrivateKeyJwk = (env.VAPID_PRIVATE_KEY_JWK ?? env.VAPID_PRIVATE_KEY ?? "") as string;
+    const vapidPublicKey      = (env.VAPID_PUBLIC_KEY ?? "") as string;
+    const vapidSubject        = (env.VAPID_SUBJECT ?? "") as string;
+
+    const target     = (form.get("target") as string) === "member" ? "member" : "all";
+    const memberId   = (form.get("notif_member_id") as string)?.trim() || undefined;
+    const title      = (form.get("notif_title") as string)?.trim() || "Sevadal";
+    const body       = (form.get("notif_body") as string)?.trim() || "";
+
+    if (!body) return json({ error: "Notification message is required." });
+    if (target === "member" && !memberId) return json({ error: "Member ID required for specific member notification." });
+
+    const result = await sendPushToMembers(DB, vapidPrivateKeyJwk, vapidPublicKey, vapidSubject, {
+      target, memberId, title, body, url: "/dashboard",
+    });
+
+    if (!result.ok && result.error) return json({ error: result.error });
+    if (result.total === 0) return json({ error: "No subscribers found. Members must open the app and allow notifications first." });
+    return json({ success: `✅ Sent to ${result.sent}/${result.total} device(s).${result.failed > 0 ? ` ${result.failed} failed.` : ""}` });
+  }
+
   if (intent === "misc-settings") {
     await setSettings(DB, {
       location_history_enabled: form.getAll("location_history_enabled").includes("1") ? "1" : "0",
