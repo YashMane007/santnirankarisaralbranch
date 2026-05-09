@@ -144,7 +144,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     if (!result.ok && result.error) return json({ error: result.error });
     if (result.total === 0) return json({ error: "No subscribers found. Members must open the app and allow notifications first." });
-    return json({ success: `✅ Sent to ${result.sent}/${result.total} device(s).${result.failed > 0 ? ` ${result.failed} failed.` : ""}` });
+    if (result.sent === 0 && result.failed > 0) {
+      return json({ error: `All ${result.failed} device(s) failed. Reason: ${result.error ?? "unknown"}. Most likely cause: VAPID key mismatch — subscriptions were made with a different key. Fix: delete all rows from push_subscriptions, redeploy with correct VAPID keys, then have members re-open the app.` });
+    }
+    return json({ success: `✅ Sent to ${result.sent}/${result.total} device(s).${result.failed > 0 ? ` ${result.failed} failed: ${result.error}` : ""}` });
   }
 
   if (intent === "misc-settings") {

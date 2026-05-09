@@ -49,8 +49,6 @@ export async function sendPushToMembers(
   };
 
   let sent = 0, failed = 0;
-  let firstFailureDetail = "";
-
   for (const sub of subs) {
     const result = await sendPushNotification(
       { endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth },
@@ -63,23 +61,11 @@ export async function sendPushToMembers(
       sent++;
     } else {
       failed++;
-      // Capture first failure for admin debugging
-      if (!firstFailureDetail) {
-        firstFailureDetail = `HTTP ${result.status ?? "?"}: ${result.error ?? "unknown"}`;
-      }
       if (result.status === 410 || result.status === 404) {
-        // Subscription expired/revoked — remove stale entry
         await deletePushSubscriptionByEndpoint(db, sub.endpoint);
       }
     }
   }
 
-  return {
-    ok: true,
-    sent,
-    failed,
-    total: subs.length,
-    // Surface first failure so admin can diagnose (VAPID mismatch = 401, expired = 410, etc.)
-    error: failed > 0 ? firstFailureDetail : undefined,
-  };
+  return { ok: true, sent, failed, total: subs.length };
 }
