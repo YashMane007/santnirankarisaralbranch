@@ -114,6 +114,62 @@ export async function action({ request, context }: ActionFunctionArgs) {
     }
   }
 
+  if (intent === "test-push") {
+    const env = context.cloudflare.env as any;
+    const vapidPrivateKey = (env.VAPID_PRIVATE_KEY_JWK ?? env.VAPID_PRIVATE_KEY ?? "") as string;
+    const vapidPublicKey  = (env.VAPID_PUBLIC_KEY ?? "") as string;
+    const vapidSubject    = (env.VAPID_SUBJECT ?? "") as string;
+
+    if (!vapidPrivateKey || !vapidPublicKey) {
+      return json({ error: "VAPID keys not set. Add VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY_JWK (or VAPID_PRIVATE_KEY) to your secrets." });
+    }
+
+    // Import sendPushNotification directly to test with raw error output
+    const { sendPushNotification } = await import("~/lib/webpush.server");
+    const { getAllPushSubscriptions, getPushSubscriptionsForMember } = await import("~/lib/db.server");
+
+    // Send only to the logged-in admin for testing
+    const adminSubs = await getPushSubscriptionsForMember(DB, session.memberId);
+    if (adminSubs.length === 0) {
+      return json({ error: `No push subscription found for your account (${session.memberId}). Open the app on a device, allow notifications, then try again.` });
+    }
+
+    const testPayload = {
+      title: "🔔 Test Push",
+      body:  `Sevadal push notifications working! Sent at ${new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" })} IST`,
+      icon:  "/icon-192.png",
+      badge: "/icon-192.png",
+      url:   "/dashboard",
+    };
+
+    const results = await Promise.all(
+      adminSubs.map(sub =>
+        sendPushNotification(
+          { endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth },
+          testPayload,
+          vapidPrivateKey,
+          vapidPublicKey,
+          vapidSubject
+        )
+      )
+    );
+
+    const succeeded = results.filter(r => r.ok).length;
+    const firstErr  = results.find(r => !r.ok);
+
+    if (succeeded === 0) {
+      return json({
+        error: `Test push failed on all ${results.length} device(s). ` +
+          `HTTP ${firstErr?.status ?? "?"}: ${firstErr?.error ?? "unknown"}. ` +
+          `If HTTP 401 → VAPID key mismatch (subscriptions made with different key). ` +
+          `If JSON parse error → VAPID_PRIVATE_KEY is raw base64url, but you used VAPID_PRIVATE_KEY_JWK name. ` +
+          `Fix: DELETE FROM push_subscriptions; redeploy; members re-open app.`,
+      });
+    }
+
+    return json({ success: `✅ Test push sent to ${succeeded}/${results.length} of your device(s). Check your notification tray.` });
+  }
+
   if (intent === "notification-settings") {
     await setSettings(DB, {
       notifications_enabled:   form.getAll("notifications_enabled").includes("1") ? "1" : "0",
@@ -396,7 +452,19 @@ export default function AdminSettingsPage() {
                 <input name="notif_member_id" type="text" className="form-input" placeholder="Member ID (if specific member)" style={{ maxWidth:"200px" }} />
                 <input name="notif_title" type="text" className="form-input" placeholder="Notification title" defaultValue="Sevadal" />
                 <textarea name="notif_body" className="form-input" placeholder="Notification message" rows={2} style={{ resize:"vertical" }} />
-                <div><button type="submit" className="btn btn-secondary btn-sm">📤 Send Now</button></div>
+                <div style={{ display:"flex", gap:"10px", flexWrap:"wrap" }}>
+                  <button type="submit" className="btn btn-secondary btn-sm">📤 Send Now</button>
+                </div>
+              </Form>
+              {/* ── Test Push (separate form — sends only to logged-in admin) ── */}
+              <Form method="post" style={{ marginTop:"12px" }}>
+                <input type="hidden" name="intent" value="test-push" />
+                <button type="submit" className="btn btn-outline btn-sm" title="Sends a test notification only to your own devices — useful for verifying VAPID keys work">
+                  🧪 Test Push to My Device
+                </button>
+                <p style={{ fontSize:"11px", color:"var(--text-muted)", marginTop:"4px" }}>
+                  Sends only to YOUR devices. Use this first to verify push works before sending to all members.
+                </p>
               </Form>
             </div>
           </div>
