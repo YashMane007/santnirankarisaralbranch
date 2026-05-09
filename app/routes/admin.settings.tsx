@@ -116,9 +116,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
   if (intent === "notification-settings") {
     await setSettings(DB, {
-      notifications_enabled:   form.getAll("notifications_enabled").includes("1"),
-      reminder_enabled:        form.getAll("reminder_enabled").includes("1"),
-      reminder_minutes_before: parseInt((form.get("reminder_minutes_before") as string) || "60", 10),
+      notifications_enabled:   form.getAll("notifications_enabled").includes("1") ? "1" : "0",
+      reminder_enabled:        form.getAll("reminder_enabled").includes("1") ? "1" : "0",
+      reminder_minutes_before: String(parseInt((form.get("reminder_minutes_before") as string) || "60", 10)),
     });
     if (kv) await invalidateSettings(kv);
     return json({ success: "Notification settings saved." });
