@@ -90,14 +90,17 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
       if (!sub) {
         try {
-          const key = Uint8Array.from(atob(vapidKey.replace(/-/g,'+').replace(/_/g,'/')), c => c.charCodeAt(0));
+          const key = Uint8Array.from(atob(vapidKey.replaceAll('-','+').replaceAll('_','/')), c => c.charCodeAt(0));
           sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
         } catch(e) { console.warn('Push subscribe failed', e); return; }
       }
 
       // Send subscription to server
-      const p256dh = btoa(String.fromCharCode(...new Uint8Array(sub.getKey('p256dh')))).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');
-      const auth   = btoa(String.fromCharCode(...new Uint8Array(sub.getKey('auth')))).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');
+      // NOTE: use replaceAll(string) not /regex/ here — this code lives inside
+      // a JS template literal where \+ and \/ are mangled by the JS parser,
+      // producing invalid regex /+/g and causing a SyntaxError at runtime.
+      const p256dh = btoa(String.fromCharCode(...new Uint8Array(sub.getKey('p256dh')))).replace(/=/g,'').replaceAll('+','-').replaceAll('/','_');
+      const auth   = btoa(String.fromCharCode(...new Uint8Array(sub.getKey('auth')))).replace(/=/g,'').replaceAll('+','-').replaceAll('/','_');
       fetch('/api/push-subscribe', {
         method: 'POST',
         headers: { 'Content-Type':'application/json' },
